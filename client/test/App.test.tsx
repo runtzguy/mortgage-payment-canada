@@ -99,6 +99,49 @@ describe("App", () => {
     expect(screen.getByText("$2,698.35")).toBeInTheDocument();
   });
 
+  it("shows a skeleton loader while the request is in flight, then the result", async () => {
+    let resolveFetch!: (response: Response) => void;
+    const fetchMock = vi.fn().mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole("button", { name: /calculate payment/i }));
+
+    // While the request is pending: skeleton is showing, real content isn't.
+    expect(screen.getByRole("status", { name: /calculating payment/i })).toBeInTheDocument();
+    expect(screen.queryByText("Mortgage payment")).not.toBeInTheDocument();
+
+    resolveFetch(
+      jsonResponse({
+        payment: 2326.42,
+        mortgagePayment: 2326.42,
+        cmhcPayment: 0,
+        paymentSchedule: "monthly",
+        paymentsPerYear: 12,
+        numberOfPayments: 300,
+        minimumDownPayment: 25000,
+        principal: 400000,
+        isInsured: false,
+        cmhcPremiumRate: 0,
+        cmhcPremium: 0,
+        totalLoanAmount: 400000,
+      }),
+    );
+
+    // Once resolved: skeleton is gone, real content is shown.
+    await waitFor(() => {
+      expect(screen.getByText("Mortgage payment")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("status", { name: /calculating payment/i })).not.toBeInTheDocument();
+  });
+
   it("shows the server's error message on a 400 response", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(

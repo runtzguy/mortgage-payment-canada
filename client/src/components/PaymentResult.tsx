@@ -8,9 +8,14 @@ const currency = new Intl.NumberFormat("en-US", {
 interface PaymentResultProps {
   result: MortgagePaymentResponse | null;
   errorMessage: string | null;
+  isLoading: boolean;
 }
 
-export function PaymentResult({ result, errorMessage }: PaymentResultProps) {
+export function PaymentResult({ result, errorMessage, isLoading }: PaymentResultProps) {
+  if (isLoading) {
+    return <PaymentResultSkeleton />;
+  }
+
   if (errorMessage) {
     return (
       <div className="result-panel result-panel--error" role="alert">
@@ -64,6 +69,53 @@ export function PaymentResult({ result, errorMessage }: PaymentResultProps) {
           <dt>Total loan amount</dt>
           <dd>{currency.format(result.totalLoanAmount)}</dd>
         </div>
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * Mirrors the real result's structure (heading, 3 breakdown rows, 4 detail
+ * rows) so the panel doesn't change size when the real content arrives.
+ */
+function PaymentResultSkeleton() {
+  return (
+    <div
+      className="result-panel"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label="Calculating payment…"
+    >
+      <span className="visually-hidden">Calculating payment…</span>
+      <div className="skeleton skeleton-heading" aria-hidden="true" />
+
+      <div className="payment-breakdown" aria-hidden="true">
+        <div className="payment-breakdown-row">
+          <span className="skeleton skeleton-text skeleton-text--label" />
+          <span className="skeleton skeleton-text skeleton-text--value" />
+        </div>
+        <div className="payment-breakdown-row">
+          <span className="skeleton skeleton-text skeleton-text--label" />
+          <span className="skeleton skeleton-text skeleton-text--value" />
+        </div>
+        <div className="payment-breakdown-row payment-breakdown-row--total">
+          <span className="skeleton skeleton-text skeleton-text--label" />
+          <span className="skeleton skeleton-text skeleton-text--value" />
+        </div>
+      </div>
+
+      <dl className="result-details" aria-hidden="true">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i}>
+            <dt>
+              <span className="skeleton skeleton-text skeleton-text--label" />
+            </dt>
+            <dd>
+              <span className="skeleton skeleton-text skeleton-text--value" />
+            </dd>
+          </div>
+        ))}
       </dl>
     </div>
   );

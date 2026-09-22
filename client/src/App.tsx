@@ -32,7 +32,7 @@ export function App() {
       <h1>Mortgage Payment Calculator</h1>
       <div className="layout">
         <MortgageForm onSubmit={handleSubmit} isSubmitting={isSubmitting} />
-        <PaymentResult result={result} errorMessage={errorMessage} />
+        <PaymentResult result={result} errorMessage={errorMessage} isLoading={isSubmitting} />
       </div>
     </main>
   );
