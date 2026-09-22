@@ -108,7 +108,13 @@ export function calculateMortgagePayment(request: MortgageRequest): MortgagePaym
   const annualRateDecimal = annualInterestRate / 100;
   const paymentsPerYear = PAYMENTS_PER_YEAR[paymentSchedule];
 
-  let payment: number;
+  // The amortization formula is linear in the loan amount (rate and number of
+  // payments held fixed), so amortizedPayment(principal) + amortizedPayment(premium)
+  // equals amortizedPayment(principal + premium) exactly, before rounding. That lets
+  // the mortgage portion and the CMHC portion of the payment be split out for display
+  // while still summing to the same total the client would get from totalLoanAmount alone.
+  let mortgagePaymentRaw: number;
+  let cmhcPaymentRaw: number;
   let numberOfPayments: number;
 
   if (paymentSchedule === "accelerated-biweekly") {
@@ -117,17 +123,27 @@ export function calculateMortgagePayment(request: MortgageRequest): MortgagePaym
     // makes it "accelerated" (see services/mortgage.test.ts for the math).
     const monthlyRate = periodicRate(annualRateDecimal, 12);
     const monthlyPayments = amortizationYears * 12;
-    const monthlyPayment = amortizedPayment(totalLoanAmount, monthlyRate, monthlyPayments);
-    payment = monthlyPayment / 2;
+    mortgagePaymentRaw = amortizedPayment(principal, monthlyRate, monthlyPayments) / 2;
+    cmhcPaymentRaw = amortizedPayment(premium, monthlyRate, monthlyPayments) / 2;
     numberOfPayments = amortizationYears * 26;
   } else {
     numberOfPayments = amortizationYears * paymentsPerYear;
     const rateForSchedule = periodicRate(annualRateDecimal, paymentsPerYear);
-    payment = amortizedPayment(totalLoanAmount, rateForSchedule, numberOfPayments);
+    mortgagePaymentRaw = amortizedPayment(principal, rateForSchedule, numberOfPayments);
+    cmhcPaymentRaw = amortizedPayment(premium, rateForSchedule, numberOfPayments);
   }
 
+  // Round the two displayed line items first, then derive the total from them,
+  // so the client's own mortgagePayment + cmhcPayment always equals `payment`
+  // exactly — never off by a cent from rounding the combined amount separately.
+  const mortgagePayment = roundToCents(mortgagePaymentRaw);
+  const cmhcPayment = roundToCents(cmhcPaymentRaw);
+  const payment = roundToCents(mortgagePayment + cmhcPayment);
+
   return {
-    payment: roundToCents(payment),
+    payment,
+    mortgagePayment,
+    cmhcPayment,
     paymentSchedule,
     paymentsPerYear,
     numberOfPayments,

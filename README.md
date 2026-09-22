@@ -76,7 +76,9 @@ Request body:
 
 ```json
 {
-  "payment": 2698.36,
+  "payment": 2698.35,
+  "mortgagePayment": 2617.22,
+  "cmhcPayment": 81.13,
   "paymentSchedule": "monthly",
   "paymentsPerYear": 12,
   "numberOfPayments": 300,
@@ -88,6 +90,13 @@ Request body:
   "totalLoanAmount": 463950
 }
 ```
+
+- `mortgagePayment` and `cmhcPayment` are the per-payment amounts for the principal and the
+  financed CMHC premium respectively; each is rounded to the cent first, and `payment` is their
+  sum, so `mortgagePayment + cmhcPayment` always equals `payment` exactly. When `isInsured` is
+  `false`, `cmhcPayment` is `0` and `mortgagePayment` equals `payment`.
+- `cmhcPremium` (singular, no "Payment") is the one-time premium amount financed into the loan —
+  not paid up front, but the lump sum that `cmhcPayment` amortizes over the term.
 
 400 response:
 

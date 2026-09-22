@@ -17,6 +17,8 @@ describe("POST /api/mortgage/payment", () => {
     const res = await request(app).post("/api/mortgage/payment").send(validBody);
     expect(res.status).toBe(200);
     expect(res.body.payment).toBe(2326.42);
+    expect(res.body.mortgagePayment).toBe(2326.42);
+    expect(res.body.cmhcPayment).toBe(0);
     expect(res.body.isInsured).toBe(false);
   });
 
@@ -78,5 +80,6 @@ describe("POST /api/mortgage/payment", () => {
       });
     expect(res.status).toBe(200);
     expect(res.body.isInsured).toBe(true);
+    expect(res.body.mortgagePayment + res.body.cmhcPayment).toBeCloseTo(res.body.payment, 10);
   });
 });

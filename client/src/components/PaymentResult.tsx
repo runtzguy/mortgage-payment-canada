@@ -31,7 +31,26 @@ export function PaymentResult({ result, errorMessage }: PaymentResultProps) {
   return (
     <div className="result-panel">
       <h2>{PAYMENT_SCHEDULE_LABELS[result.paymentSchedule]} payment</h2>
-      <p className="payment-amount">{currency.format(result.payment)}</p>
+
+      {result.isInsured ? (
+        <div className="payment-breakdown">
+          <div className="payment-breakdown-row">
+            <span>Mortgage payment</span>
+            <span>{currency.format(result.mortgagePayment)}</span>
+          </div>
+          <div className="payment-breakdown-row">
+            <span>+ CMHC insurance payment</span>
+            <span>{currency.format(result.cmhcPayment)}</span>
+          </div>
+          <div className="payment-breakdown-row payment-breakdown-row--total">
+            <span>Total payment</span>
+            <span>{currency.format(result.payment)}</span>
+          </div>
+        </div>
+      ) : (
+        <p className="payment-amount">{currency.format(result.payment)}</p>
+      )}
+
       <dl className="result-details">
         <div>
           <dt>Number of payments</dt>
@@ -44,7 +63,7 @@ export function PaymentResult({ result, errorMessage }: PaymentResultProps) {
         {result.isInsured && (
           <>
             <div>
-              <dt>CMHC premium ({(result.cmhcPremiumRate * 100).toFixed(2)}%)</dt>
+              <dt>CMHC premium ({(result.cmhcPremiumRate * 100).toFixed(2)}%, financed)</dt>
               <dd>{currency.format(result.cmhcPremium)}</dd>
             </div>
             <div>

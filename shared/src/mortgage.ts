@@ -130,7 +130,12 @@ export type MortgageRequest = z.infer<typeof MortgageRequestSchema>;
 // ---------------------------------------------------------------------------
 
 export interface MortgagePaymentResponse {
+  /** Total per-payment amount: mortgagePayment + cmhcPayment (already reconciled to the cent). */
   payment: number;
+  /** Portion of `payment` amortizing the principal (price - down payment) alone. */
+  mortgagePayment: number;
+  /** Portion of `payment` amortizing the financed CMHC premium alone. 0 when not insured. */
+  cmhcPayment: number;
   paymentSchedule: PaymentSchedule;
   paymentsPerYear: number;
   numberOfPayments: number;
@@ -138,6 +143,7 @@ export interface MortgagePaymentResponse {
   principal: number;
   isInsured: boolean;
   cmhcPremiumRate: number;
+  /** One-time CMHC premium amount, financed into totalLoanAmount (not paid up front). */
   cmhcPremium: number;
   totalLoanAmount: number;
 }

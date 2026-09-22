@@ -93,6 +93,9 @@ describe("calculateMortgagePayment", () => {
     expect(result.cmhcPremiumRate).toBe(0);
     expect(result.totalLoanAmount).toBe(400_000);
     expect(result.payment).toBe(2326.42);
+    // Not insured: the whole payment is the mortgage portion, no CMHC portion.
+    expect(result.mortgagePayment).toBe(2326.42);
+    expect(result.cmhcPayment).toBe(0);
     expect(result.numberOfPayments).toBe(300);
     expect(result.paymentsPerYear).toBe(12);
   });
@@ -120,7 +123,22 @@ describe("calculateMortgagePayment", () => {
     expect(result.cmhcPremiumRate).toBeCloseTo(0.031, 10);
     expect(result.cmhcPremium).toBe(13_950);
     expect(result.totalLoanAmount).toBe(463_950);
-    expect(result.payment).toBe(2698.36);
+    // mortgagePayment and cmhcPayment are each amortized on their own share of the
+    // loan, rounded to the cent first, then summed — so payment always equals
+    // their exact sum, even when that differs by a cent from rounding the
+    // combined loan amount directly (2698.36 vs 2698.35 here).
+    expect(result.mortgagePayment).toBe(2617.22);
+    expect(result.cmhcPayment).toBe(81.13);
+    expect(result.payment).toBe(2698.35);
+    expect(result.mortgagePayment + result.cmhcPayment).toBeCloseTo(result.payment, 10);
+  });
+
+  it("splits mortgagePayment and cmhcPayment consistently across every schedule", () => {
+    for (const paymentSchedule of ["monthly", "biweekly", "accelerated-biweekly"] as const) {
+      const result = calculateMortgagePayment(request({ downPayment: 50_000, paymentSchedule }));
+      expect(result.mortgagePayment + result.cmhcPayment).toBeCloseTo(result.payment, 10);
+      expect(result.cmhcPayment).toBeGreaterThan(0);
+    }
   });
 
   it("rejects a down payment below the minimum", () => {
