@@ -1,0 +1,59 @@
+import { PAYMENT_SCHEDULE_LABELS, type MortgagePaymentResponse } from "@benjipays/shared";
+
+const currency = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+
+interface PaymentResultProps {
+  result: MortgagePaymentResponse | null;
+  errorMessage: string | null;
+}
+
+export function PaymentResult({ result, errorMessage }: PaymentResultProps) {
+  if (errorMessage) {
+    return (
+      <div className="result-panel result-panel--error" role="alert">
+        <h2>Couldn't calculate payment</h2>
+        <p>{errorMessage}</p>
+      </div>
+    );
+  }
+
+  if (!result) {
+    return (
+      <div className="result-panel result-panel--empty">
+        <p>Fill out the form and submit to see your payment.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="result-panel">
+      <h2>{PAYMENT_SCHEDULE_LABELS[result.paymentSchedule]} payment</h2>
+      <p className="payment-amount">{currency.format(result.payment)}</p>
+      <dl className="result-details">
+        <div>
+          <dt>Number of payments</dt>
+          <dd>{result.numberOfPayments}</dd>
+        </div>
+        <div>
+          <dt>Loan principal</dt>
+          <dd>{currency.format(result.principal)}</dd>
+        </div>
+        {result.isInsured && (
+          <>
+            <div>
+              <dt>CMHC premium ({(result.cmhcPremiumRate * 100).toFixed(2)}%)</dt>
+              <dd>{currency.format(result.cmhcPremium)}</dd>
+            </div>
+            <div>
+              <dt>Total loan amount</dt>
+              <dd>{currency.format(result.totalLoanAmount)}</dd>
+            </div>
+          </>
+        )}
+      </dl>
+    </div>
+  );
+}

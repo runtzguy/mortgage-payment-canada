@@ -1,0 +1,24 @@
+{
+  "name": "@benjipays/shared",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/mortgage.js",
+  "types": "./dist/mortgage.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/mortgage.d.ts",
+      "default": "./dist/mortgage.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
