@@ -32,24 +32,20 @@ export function PaymentResult({ result, errorMessage }: PaymentResultProps) {
     <div className="result-panel">
       <h2>{PAYMENT_SCHEDULE_LABELS[result.paymentSchedule]} payment</h2>
 
-      {result.isInsured ? (
-        <div className="payment-breakdown">
-          <div className="payment-breakdown-row">
-            <span>Mortgage payment</span>
-            <span>{currency.format(result.mortgagePayment)}</span>
-          </div>
-          <div className="payment-breakdown-row">
-            <span>+ CMHC insurance payment</span>
-            <span>{currency.format(result.cmhcPayment)}</span>
-          </div>
-          <div className="payment-breakdown-row payment-breakdown-row--total">
-            <span>Total payment</span>
-            <span>{currency.format(result.payment)}</span>
-          </div>
+      <div className="payment-breakdown">
+        <div className="payment-breakdown-row">
+          <span>Mortgage payment</span>
+          <span>{currency.format(result.mortgagePayment)}</span>
         </div>
-      ) : (
-        <p className="payment-amount">{currency.format(result.payment)}</p>
-      )}
+        <div className="payment-breakdown-row">
+          <span>+ CMHC insurance payment</span>
+          <span>{currency.format(result.cmhcPayment)}</span>
+        </div>
+        <div className="payment-breakdown-row payment-breakdown-row--total">
+          <span>Total payment</span>
+          <span>{currency.format(result.payment)}</span>
+        </div>
+      </div>
 
       <dl className="result-details">
         <div>
@@ -60,18 +56,14 @@ export function PaymentResult({ result, errorMessage }: PaymentResultProps) {
           <dt>Loan principal</dt>
           <dd>{currency.format(result.principal)}</dd>
         </div>
-        {result.isInsured && (
-          <>
-            <div>
-              <dt>CMHC premium ({(result.cmhcPremiumRate * 100).toFixed(2)}%, financed)</dt>
-              <dd>{currency.format(result.cmhcPremium)}</dd>
-            </div>
-            <div>
-              <dt>Total loan amount</dt>
-              <dd>{currency.format(result.totalLoanAmount)}</dd>
-            </div>
-          </>
-        )}
+        <div>
+          <dt>CMHC premium ({(result.cmhcPremiumRate * 100).toFixed(2)}%, financed)</dt>
+          <dd>{currency.format(result.cmhcPremium)}</dd>
+        </div>
+        <div>
+          <dt>Total loan amount</dt>
+          <dd>{currency.format(result.totalLoanAmount)}</dd>
+        </div>
       </dl>
     </div>
   );

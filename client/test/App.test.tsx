@@ -49,8 +49,13 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /calculate payment/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("$2,326.42")).toBeInTheDocument();
+      // mortgagePayment and the total both read $2,326.42 when cmhcPayment is 0.
+      expect(screen.getAllByText("$2,326.42").length).toBeGreaterThan(0);
     });
+    // CMHC payment is still shown explicitly as $0.00, not hidden (appears in both
+    // the breakdown row and the CMHC premium detail row).
+    expect(screen.getByText("+ CMHC insurance payment")).toBeInTheDocument();
+    expect(screen.getAllByText("$0.00").length).toBe(2);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/mortgage/payment",
       expect.objectContaining({ method: "POST" }),

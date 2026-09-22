@@ -221,13 +221,6 @@ button[type="submit"]:disabled {
   color: var(--color-error-text);
 }
 
-.payment-amount {
-  font-size: 2rem;
-  font-weight: 700;
-  margin: 0 0 1rem;
-  word-break: break-word;
-}
-
 /* Mortgage payment + CMHC payment = total, laid out like a receipt. */
 .payment-breakdown {
   display: flex;
