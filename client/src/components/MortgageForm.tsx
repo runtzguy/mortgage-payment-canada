@@ -1,13 +1,62 @@
-import { useState } from "react";
-import type { FormEvent } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import {
   AMORTIZATION_YEARS_OPTIONS,
+  cmhcBracketRate,
+  CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS,
+  CMHC_SELF_EMPLOYED_BRACKETS,
+  CMHC_STANDARD_BRACKETS,
+  INSURED_DOWN_PAYMENT_THRESHOLD,
+  MortgageRequestSchema,
   PAYMENT_SCHEDULES,
   PAYMENT_SCHEDULE_LABELS,
   type AmortizationYears,
   type MortgageRequest,
   type PaymentSchedule,
 } from "@benjipays/shared";
+
+/** Digits and at most one decimal point — whatever the user actually typed. */
+function toRawAmount(value: string): string {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const [whole, ...rest] = cleaned.split(".");
+  return rest.length > 0 ? `${whole}.${rest.join("")}` : whole;
+}
+
+/**
+ * Groups the integer part in thousands for display. A trailing "." and a
+ * partial decimal are left alone so the field stays editable mid-typing.
+ */
+function formatAmount(raw: string): string {
+  if (raw === "") {
+    return "";
+  }
+  const [wholeRaw, fraction] = raw.split(".");
+  const whole = wholeRaw.replace(/^0+(?=\d)/, "");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return raw.includes(".") ? `${grouped}.${fraction ?? ""}` : grouped;
+}
+
+/**
+ * Index just past the nth character that survives formatting, so the caret
+ * stays put as commas appear. Counts the decimal point as well as digits —
+ * counting digits alone parks the caret before a just-typed ".", which sends
+ * the next keystroke to the wrong side of it.
+ */
+function caretAfterRawLength(value: string, rawLength: number): number {
+  if (rawLength <= 0) {
+    return 0;
+  }
+  let seen = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    if (/[\d.]/.test(value[i])) {
+      seen += 1;
+      if (seen === rawLength) {
+        return i + 1;
+      }
+    }
+  }
+  return value.length;
+}
 
 interface FormState {
   propertyPrice: string;
@@ -33,25 +82,102 @@ const initialState: FormState = {
   isSelfEmployedNonVerifiedIncome: false,
 };
 
+type FieldErrors = Partial<Record<keyof MortgageRequest, string>>;
+
+export interface ServerError {
+  message: string;
+  field?: string;
+}
+
 interface MortgageFormProps {
   onSubmit: (request: MortgageRequest) => void;
   isSubmitting: boolean;
+  /** A typed error from the last request, so the offending input can be marked. */
+  serverError?: ServerError | null;
 }
 
-export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) {
+    return null;
+  }
+  return (
+    <p className="field-error" id={id}>
+      {message}
+    </p>
+  );
+}
+
+export function MortgageForm({ onSubmit, isSubmitting, serverError }: MortgageFormProps) {
   const [form, setForm] = useState<FormState>(initialState);
+  const [clientErrors, setClientErrors] = useState<FieldErrors>({});
+  /** Set by an amount field's onChange, consumed once the re-render commits. */
+  const pendingCaret = useRef<{ input: HTMLInputElement; rawLength: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const pending = pendingCaret.current;
+    if (!pending) {
+      return;
+    }
+    pendingCaret.current = null;
+    const position = caretAfterRawLength(pending.input.value, pending.rawLength);
+    pending.input.setSelectionRange(position, position);
+  });
+
+  const propertyPrice = Number(toRawAmount(form.propertyPrice));
+  const downPayment = Number(toRawAmount(form.downPayment));
 
   const isInsuredCandidate =
     form.propertyPrice !== "" &&
     form.downPayment !== "" &&
-    Number(form.downPayment) < 0.2 * Number(form.propertyPrice);
-  const showEligibilityFields = isInsuredCandidate && form.amortizationYears === 30;
+    downPayment < INSURED_DOWN_PAYMENT_THRESHOLD * propertyPrice;
+  const eligibilityRequired = isInsuredCandidate && form.amortizationYears === 30;
+
+  // Whether each flag actually moves the premium at this down payment, read
+  // off the same tables the server prices with. Non-traditional sources only
+  // differ below 10% down, so at 10%+ the checkbox is correctly inert — say so
+  // rather than leaving the user to wonder whether it is broken.
+  const downPaymentPercent = propertyPrice > 0 ? downPayment / propertyPrice : 0;
+  const standardRate = cmhcBracketRate(CMHC_STANDARD_BRACKETS, downPaymentPercent);
+  const nonTraditionalChangesPremium =
+    isInsuredCandidate &&
+    cmhcBracketRate(CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS, downPaymentPercent) !==
+      standardRate;
+  const selfEmployedChangesPremium =
+    isInsuredCandidate &&
+    cmhcBracketRate(CMHC_SELF_EMPLOYED_BRACKETS, downPaymentPercent) !== standardRate;
+
+  /** Reformats as the user types, keeping the caret beside the same digit. */
+  function handleAmountChange(field: "propertyPrice" | "downPayment") {
+    return (event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const rawBeforeCaret = toRawAmount(input.value.slice(0, input.selectionStart ?? 0));
+      const formatted = formatAmount(toRawAmount(input.value));
+      pendingCaret.current = { input, rawLength: rawBeforeCaret.length };
+      setForm((f) => ({ ...f, [field]: formatted }));
+    };
+  }
+
+  /** Client-side error first, then the server's, so the newest feedback wins. */
+  function errorFor(field: keyof MortgageRequest): string | undefined {
+    return clientErrors[field] ?? (serverError?.field === field ? serverError.message : undefined);
+  }
+
+  function fieldProps(field: keyof MortgageRequest) {
+    const message = errorFor(field);
+    return {
+      "aria-invalid": message ? true : undefined,
+      "aria-describedby": message ? `${field}-error` : undefined,
+    } as const;
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSubmit({
-      propertyPrice: Number(form.propertyPrice),
-      downPayment: Number(form.downPayment),
+
+    // The same schema the API validates with, so rule violations (a down
+    // payment above the price, say) are caught without a round trip.
+    const parsed = MortgageRequestSchema.safeParse({
+      propertyPrice,
+      downPayment,
       annualInterestRate: Number(form.annualInterestRate),
       amortizationYears: form.amortizationYears,
       paymentSchedule: form.paymentSchedule,
@@ -60,34 +186,53 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
       hasNonTraditionalDownPayment: form.hasNonTraditionalDownPayment,
       isSelfEmployedNonVerifiedIncome: form.isSelfEmployedNonVerifiedIncome,
     });
+
+    if (!parsed.success) {
+      const next: FieldErrors = {};
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0] as keyof MortgageRequest | undefined;
+        if (key && !next[key]) {
+          next[key] = issue.message;
+        }
+      }
+      setClientErrors(next);
+      return;
+    }
+
+    setClientErrors({});
+    onSubmit(parsed.data);
   }
 
   return (
-    <form className="mortgage-form" onSubmit={handleSubmit}>
+    <form className="mortgage-form" onSubmit={handleSubmit} noValidate>
       <div className="field">
         <label htmlFor="propertyPrice">Property price ($)</label>
         <input
           id="propertyPrice"
-          type="number"
+          type="text"
           inputMode="decimal"
-          min={0}
+          autoComplete="off"
           required
           value={form.propertyPrice}
-          onChange={(e) => setForm((f) => ({ ...f, propertyPrice: e.target.value }))}
+          onChange={handleAmountChange("propertyPrice")}
+          {...fieldProps("propertyPrice")}
         />
+        <FieldError id="propertyPrice-error" message={errorFor("propertyPrice")} />
       </div>
 
       <div className="field">
         <label htmlFor="downPayment">Down payment ($)</label>
         <input
           id="downPayment"
-          type="number"
+          type="text"
           inputMode="decimal"
-          min={0}
+          autoComplete="off"
           required
           value={form.downPayment}
-          onChange={(e) => setForm((f) => ({ ...f, downPayment: e.target.value }))}
+          onChange={handleAmountChange("downPayment")}
+          {...fieldProps("downPayment")}
         />
+        <FieldError id="downPayment-error" message={errorFor("downPayment")} />
       </div>
 
       <div className="field">
@@ -102,7 +247,9 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
           required
           value={form.annualInterestRate}
           onChange={(e) => setForm((f) => ({ ...f, annualInterestRate: e.target.value }))}
+          {...fieldProps("annualInterestRate")}
         />
+        <FieldError id="annualInterestRate-error" message={errorFor("annualInterestRate")} />
       </div>
 
       <div className="field-row">
@@ -117,6 +264,7 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
                 amortizationYears: Number(e.target.value) as AmortizationYears,
               }))
             }
+            {...fieldProps("amortizationYears")}
           >
             {AMORTIZATION_YEARS_OPTIONS.map((years) => (
               <option key={years} value={years}>
@@ -124,6 +272,7 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
               </option>
             ))}
           </select>
+          <FieldError id="amortizationYears-error" message={errorFor("amortizationYears")} />
         </div>
 
         <div className="field">
@@ -156,6 +305,13 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
           />
           Down payment includes borrowed funds and gift from non-immediate family members?
         </label>
+        <p className="field-hint">
+          {!isInsuredCandidate
+            ? "Only affects the CMHC premium when the down payment is under 20%."
+            : nonTraditionalChangesPremium
+              ? "Raises the CMHC premium rate for this down payment."
+              : "At 10% or more down, borrowed or gifted funds are priced the same as a traditional down payment — this only raises the premium below 10%."}
+        </p>
         <label className="checkbox-field">
           <input
             type="checkbox"
@@ -166,6 +322,13 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
           />
           Self-Employed without third party verification?
         </label>
+        <p className="field-hint">
+          {!isInsuredCandidate
+            ? "Only affects the CMHC premium when the down payment is under 20%."
+            : selfEmployedChangesPremium
+              ? "Raises the CMHC premium rate, and requires at least 10% down."
+              : "Requires at least 10% down."}
+        </p>
       </fieldset>
 
       <fieldset className="eligibility-fields">
@@ -187,7 +350,7 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
           This is a newly constructed home
         </label>
         <p className="field-hint">
-          {showEligibilityFields
+          {eligibilityRequired
             ? "A 30-year amortization on a mortgage with less than 20% down requires one of these to be checked."
             : "Only relevant for a 30-year amortization with less than 20% down."}
         </p>

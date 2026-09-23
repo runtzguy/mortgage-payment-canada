@@ -16,7 +16,27 @@ const app = createApp({
   clientDistPath,
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`Server listening on http://localhost:${PORT}`);
 });
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  // eslint-disable-next-line no-console
+  console.error(
+    err.code === "EADDRINUSE"
+      ? `Port ${PORT} is already in use.`
+      : `Server failed to start: ${err.message}`,
+  );
+  process.exit(1);
+});
+
+// Stop accepting connections and let in-flight requests finish before exiting,
+// so a rolling deploy doesn't drop a response mid-calculation.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+}

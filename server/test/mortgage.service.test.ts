@@ -114,27 +114,35 @@ describe("selectCmhcBracketTable", () => {
 
 describe("cmhcPremiumRate with the non-traditional down payment table", () => {
   it("is 4.50% for 5% to just under 10% down (vs 4.00% standard)", () => {
-    expect(
-      cmhcPremiumRate(0.05, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS),
-    ).toBeCloseTo(0.045, 10);
-    expect(
-      cmhcPremiumRate(0.0999, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS),
-    ).toBeCloseTo(0.045, 10);
+    expect(cmhcPremiumRate(0.05, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS)).toBeCloseTo(
+      0.045,
+      10,
+    );
+    expect(cmhcPremiumRate(0.0999, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS)).toBeCloseTo(
+      0.045,
+      10,
+    );
   });
 
   it("matches the standard table's rate at 10%+ down", () => {
-    expect(
-      cmhcPremiumRate(0.1, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS),
-    ).toBeCloseTo(0.031, 10);
-    expect(
-      cmhcPremiumRate(0.15, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS),
-    ).toBeCloseTo(0.028, 10);
+    expect(cmhcPremiumRate(0.1, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS)).toBeCloseTo(
+      0.031,
+      10,
+    );
+    expect(cmhcPremiumRate(0.15, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS)).toBeCloseTo(
+      0.028,
+      10,
+    );
   });
 });
 
 describe("cmhcPremiumRate with the self-employed table", () => {
-  it("has no bracket below 10% down (unreachable once the 10% floor applies)", () => {
-    expect(cmhcPremiumRate(0.05, 25, CMHC_SELF_EMPLOYED_BRACKETS)).toBe(0);
+  it("throws below 10% down — no bracket exists, and the 10% floor makes it unreachable", () => {
+    // Guarded by SELF_EMPLOYED_MINIMUM_DOWN_PAYMENT_RATE in practice; if it is
+    // ever reached, a zero premium would be the wrong answer, not a safe one.
+    expect(() => cmhcPremiumRate(0.05, 25, CMHC_SELF_EMPLOYED_BRACKETS)).toThrow(
+      /No CMHC premium bracket/,
+    );
   });
 
   it("is 4.75% for 10% to just under 15% down", () => {
@@ -174,27 +182,53 @@ describe("amortizedPayment", () => {
   });
 });
 
+describe("cmhcPremiumRate bracket coverage", () => {
+  it("throws rather than silently charging no premium when no bracket matches", () => {
+    // 2% down is below every table's lowest bracket. Reaching this state means
+    // a rate table has a gap; returning 0 would hand out free insurance.
+    expect(() => cmhcPremiumRate(0.02, 25)).toThrow(/No CMHC premium bracket/);
+  });
+});
+
 describe("simulateAcceleratedBiweeklyPayoff", () => {
   it("pays off in fewer than the nominal years*26 periods (that's what makes it accelerated)", () => {
     // $400k loan, $1,163.21 accelerated payment (half the monthly payment for
     // this loan at 5%/25y), 5% rate: nominal is 25*26 = 650 periods.
-    const totalPaid = simulateAcceleratedBiweeklyPayoff(400_000, 1163.21, 0.05);
+    const { totalPaid, periods } = simulateAcceleratedBiweeklyPayoff(400_000, 1163.21, 0.05);
     const naiveTotal = 1163.21 * 650;
     expect(totalPaid).toBeLessThan(naiveTotal);
+    expect(periods).toBeLessThan(650);
   });
 
   it("matches the hand-computed reference: 559 periods, $649,577.28 total", () => {
     // Cross-checked independently: simulateAcceleratedBiweeklyPayoff should
     // reproduce this within a cent of rounding.
-    const totalPaid = simulateAcceleratedBiweeklyPayoff(400_000, 1163.21, 0.05);
+    const { totalPaid, periods } = simulateAcceleratedBiweeklyPayoff(400_000, 1163.21, 0.05);
     expect(totalPaid).toBeCloseTo(649_577.28, 1);
+    expect(periods).toBe(559);
   });
 
   it("returns exactly the loan amount when the rate is 0", () => {
     // 400,000 / (1163.21ish) periods, but at 0% interest total paid == principal exactly
     // (no interest to accrue), regardless of how many periods it takes.
-    const totalPaid = simulateAcceleratedBiweeklyPayoff(400_000, 2000, 0);
+    const { totalPaid } = simulateAcceleratedBiweeklyPayoff(400_000, 2000, 0);
     expect(totalPaid).toBeCloseTo(400_000, 5);
+  });
+});
+
+describe("calculateMortgagePayment payment counts", () => {
+  it("reports actualNumberOfPayments equal to numberOfPayments for monthly", () => {
+    const result = calculateMortgagePayment(request({ paymentSchedule: "monthly" }));
+    expect(result.actualNumberOfPayments).toBe(result.numberOfPayments);
+    expect(result.amortizationYears).toBe(25);
+  });
+
+  it("reports a lower actualNumberOfPayments for accelerated bi-weekly", () => {
+    const result = calculateMortgagePayment(request({ paymentSchedule: "accelerated-biweekly" }));
+    expect(result.numberOfPayments).toBe(650);
+    expect(result.actualNumberOfPayments).toBe(559);
+    // The total must match the schedule it actually ran, not the nominal one.
+    expect(result.totalMortgage).toBeLessThan(result.numberOfPayments * result.payment);
   });
 });
 
@@ -293,9 +327,7 @@ describe("calculateMortgagePayment", () => {
 
   it("rejects 30-year amortization on an insured mortgage when the buyer is not eligible", () => {
     expect(() =>
-      calculateMortgagePayment(
-        request({ downPayment: 50_000, amortizationYears: 30 }),
-      ),
+      calculateMortgagePayment(request({ downPayment: 50_000, amortizationYears: 30 })),
     ).toThrow(InvalidInputError);
   });
 

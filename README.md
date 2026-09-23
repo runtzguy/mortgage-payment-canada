@@ -12,9 +12,6 @@ server/   Express REST API (POST /api/mortgage/payment)
 client/   React + Vite single-page app
 ```
 
-See [`/Users/victorliu/.claude/plans/i-want-to-build-woolly-jellyfish.md`](/Users/victorliu/.claude/plans/i-want-to-build-woolly-jellyfish.md)
-for the full design rationale (compounding, minimum down payment tiers, CMHC premium table).
-
 ## Requirements
 
 - Node.js 20+
@@ -36,7 +33,27 @@ Vite URL in your browser.
 ```bash
 npm test         # unit + integration tests for both server and client
 npm run typecheck
+npm run lint         # ESLint (flat config, typescript-eslint + react-hooks)
+npm run format:check # Prettier
 ```
+
+CI runs all four on every push and pull request (`.github/workflows/ci.yml`).
+
+## Trade-offs and what production would need
+
+- **Money is held in `number`.** Every amount goes through a single `roundToCents` helper, and
+  the payment split is reconciled so `mortgagePayment + cmhcPayment` always equals `payment`
+  exactly. That is enough at this scale, but a real ledger should use integer cents or a decimal
+  library: binary floating-point addition is not associative, and the accelerated payoff
+  simulation accumulates over hundreds of periods.
+- **One fixed rate for the whole amortization.** Canadian mortgages renew every few years, so a
+  production calculator would take a rate schedule rather than a scalar. The payoff simulation is
+  already the right shape to accept one.
+- **No `helmet`, rate limiting, or request logging.** Deliberately left out to keep the
+  dependency surface small; all three belong in a deployed service.
+- **CMHC rates are compiled in.** They change, and a quote issued last month has to stay
+  reproducible, so production would version the rate tables and stamp the version onto the
+  response.
 
 ## Production build
 
@@ -85,8 +102,10 @@ Request body:
   "mortgagePayment": 2617.22,
   "cmhcPayment": 81.13,
   "paymentSchedule": "monthly",
+  "amortizationYears": 25,
   "paymentsPerYear": 12,
   "numberOfPayments": 300,
+  "actualNumberOfPayments": 300,
   "minimumDownPayment": 25000,
   "principal": 450000,
   "isInsured": true,
@@ -112,6 +131,11 @@ Request body:
   `numberOfPayments` (`years * 26`) is reached, so `totalMortgage` is computed by simulating the
   real payoff period-by-period instead (see `simulateAcceleratedBiweeklyPayoff` in
   `server/src/services/mortgage.ts`).
+- `numberOfPayments` is the schedule's nominal count (`amortizationYears * paymentsPerYear`);
+  `actualNumberOfPayments` is how many payments are really made. They are equal for `monthly`
+  and `biweekly`. For `accelerated-biweekly` the second is lower — a 25-year mortgage at 5%
+  clears in 559 payments rather than 650, about 3.5 years early — and it is the count that
+  `totalMortgage` corresponds to.
 
 400 response:
 
@@ -125,8 +149,13 @@ Request body:
 }
 ```
 
-`error.code` is one of `DOWN_PAYMENT_TOO_LOW` or `INVALID_INPUT` (schema validation failures,
-or a 30-year amortization requested on an insured mortgage without an eligible buyer).
+`error.code` is one of `DOWN_PAYMENT_TOO_LOW`, `INVALID_INPUT` (schema validation failures, a
+malformed JSON body, or a 30-year amortization requested on an insured mortgage without an
+eligible buyer), or `NOT_FOUND`. Every error under `/api` uses this shape, including 404s.
+
+### `GET /api/health`
+
+Returns `{ "status": "ok", "uptime": <seconds> }`.
 
 ### Rules encoded in the calculation
 
@@ -137,37 +166,39 @@ or a 30-year amortization requested on an insured mortgage without an eligible b
 - **CMHC premium** (added to the loan amount before calculating the payment), when down payment
   is under 20%:
 
-  | Down payment | Premium rate |
-  | --- | --- |
-  | 5% – 9.99% | 4.00% |
-  | 10% – 14.99% | 3.10% |
-  | 15% – 19.99% | 2.80% |
-  | 20% or more | 0% (uninsured) |
+  | Down payment | Premium rate   |
+  | ------------ | -------------- |
+  | 5% – 9.99%   | 4.00%          |
+  | 10% – 14.99% | 3.10%          |
+  | 15% – 19.99% | 2.80%          |
+  | 20% or more  | 0% (uninsured) |
 
   This is the standard CMHC schedule for a traditional down payment with verified income.
+
 - **Non-traditional down payment** (`hasNonTraditionalDownPayment: true` — down payment includes
   borrowed funds or a gift from a non-immediate family member) uses a different table; only the
   5–9.99% bracket differs from standard:
 
-  | Down payment | Premium rate |
-  | --- | --- |
-  | 5% – 9.99% | 4.50% |
-  | 10% – 14.99% | 3.10% |
-  | 15% – 19.99% | 2.80% |
-  | 20% or more | 0% (uninsured) |
+  | Down payment | Premium rate   |
+  | ------------ | -------------- |
+  | 5% – 9.99%   | 4.50%          |
+  | 10% – 14.99% | 3.10%          |
+  | 15% – 19.99% | 2.80%          |
+  | 20% or more  | 0% (uninsured) |
 
 - **Self-employed without third-party income verification** (`isSelfEmployedNonVerifiedIncome:
-  true`) raises the minimum down payment to `max(standard tiered minimum, 10% of price)` and uses
+true`) raises the minimum down payment to `max(standard tiered minimum, 10% of price)` and uses
   its own table (no 5–9.99% bracket — unreachable once the 10% floor applies):
 
-  | Down payment | Premium rate |
-  | --- | --- |
-  | 10% – 14.99% | 4.75% |
-  | 15% – 19.99% | 2.90% |
-  | 20% or more | 0% (uninsured) |
+  | Down payment | Premium rate   |
+  | ------------ | -------------- |
+  | 10% – 14.99% | 4.75%          |
+  | 15% – 19.99% | 2.90%          |
+  | 20% or more  | 0% (uninsured) |
 
   If both flags are set, the self-employed rules (table and minimum down payment) are used —
   they aren't combined with the non-traditional table.
+
 - **30-year amortization** on an insured mortgage additionally requires the buyer to be a
   first-time home buyer or to be purchasing a newly constructed home, and adds a 0.20 percentage
   point surcharge to the premium rate — on top of whichever table above applies.

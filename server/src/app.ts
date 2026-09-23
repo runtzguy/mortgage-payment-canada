@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import path from "node:path";
 import { mortgageRouter } from "./routes/mortgage.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { NotFoundError } from "./errors.js";
 
 export interface CreateAppOptions {
   /** Serve the built client from `clientDistPath` and fall back to its index.html for SPA routes. */
@@ -12,7 +13,18 @@ export interface CreateAppOptions {
 export function createApp(options: CreateAppOptions = {}): Express {
   const app = express();
   app.use(express.json());
+
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", uptime: process.uptime() });
+  });
+
   app.use("/api/mortgage", mortgageRouter);
+
+  // Any other /api path is a client error in the API's own vocabulary, not
+  // Express's default HTML 404 — the client parses every error as JSON.
+  app.use("/api", (req, _res, next) => {
+    next(new NotFoundError(req.method, req.originalUrl));
+  });
 
   if (options.serveStatic && options.clientDistPath) {
     const clientDistPath = options.clientDistPath;

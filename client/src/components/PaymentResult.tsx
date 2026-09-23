@@ -1,8 +1,8 @@
 import { PAYMENT_SCHEDULE_LABELS, type MortgagePaymentResponse } from "@benjipays/shared";
 
-const currency = new Intl.NumberFormat("en-US", {
+const currency = new Intl.NumberFormat("en-CA", {
   style: "currency",
-  currency: "USD",
+  currency: "CAD",
 });
 
 interface PaymentResultProps {
@@ -33,11 +33,12 @@ export function PaymentResult({ result, errorMessage, isLoading }: PaymentResult
     );
   }
 
-  const amortizationYears = Math.round(result.numberOfPayments / result.paymentsPerYear);
-  const isAccelerated = result.paymentSchedule === "accelerated-biweekly";
+  const paysOffEarly = result.actualNumberOfPayments < result.numberOfPayments;
+  const yearsSaved =
+    (result.numberOfPayments - result.actualNumberOfPayments) / result.paymentsPerYear;
 
   return (
-    <div className="result-panel">
+    <div className="result-panel" role="region" aria-live="polite" aria-label="Payment result">
       <h2>{PAYMENT_SCHEDULE_LABELS[result.paymentSchedule]} payment</h2>
 
       <div className="payment-breakdown">
@@ -58,10 +59,13 @@ export function PaymentResult({ result, errorMessage, isLoading }: PaymentResult
       <dl className="result-details">
         <div>
           <dt>Number of payments</dt>
-          <dd>{result.numberOfPayments}</dd>
+          <dd>
+            {result.actualNumberOfPayments}
+            {paysOffEarly ? ` of ${result.numberOfPayments} scheduled` : ""}
+          </dd>
         </div>
         <div>
-          <dt>Total Mortgage at {amortizationYears} years</dt>
+          <dt>Total Mortgage at {result.amortizationYears} years</dt>
           <dd>{currency.format(result.totalMortgage)}</dd>
         </div>
         <div>
@@ -82,11 +86,11 @@ export function PaymentResult({ result, errorMessage, isLoading }: PaymentResult
         </div>
       </dl>
 
-      {isAccelerated && (
+      {paysOffEarly && (
         <p className="field-hint">
-          Accelerated bi-weekly pays off the mortgage faster than the {amortizationYears}-year
-          term shown above, so Total Mortgage reflects that shorter, real payoff — not{" "}
-          {result.numberOfPayments} payments.
+          Accelerated bi-weekly clears the mortgage in {result.actualNumberOfPayments} payments
+          instead of {result.numberOfPayments} — about {yearsSaved.toFixed(1)} years early. Total
+          Mortgage reflects that shorter, real payoff.
         </p>
       )}
     </div>

@@ -15,11 +15,20 @@
     "pretest": "npm run build -w shared",
     "test": "npm run test -w server && npm run test -w client",
     "pretypecheck": "npm run build -w shared",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx,css,json,md,mjs}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,css,json,md,mjs}\""
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "concurrently": "^9.1.0",
-    "typescript": "^5.7.2"
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^9.1.2",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "prettier": "^3.9.8",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.70.1"
   },
   "engines": {
     "node": ">=20"

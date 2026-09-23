@@ -18,11 +18,7 @@ export type AmortizationYears = (typeof AMORTIZATION_YEARS_OPTIONS)[number];
 // Payment schedules
 // ---------------------------------------------------------------------------
 
-export const PAYMENT_SCHEDULES = [
-  "monthly",
-  "biweekly",
-  "accelerated-biweekly",
-] as const;
+export const PAYMENT_SCHEDULES = ["monthly", "biweekly", "accelerated-biweekly"] as const;
 export type PaymentSchedule = (typeof PAYMENT_SCHEDULES)[number];
 
 export const PAYMENT_SCHEDULE_LABELS: Record<PaymentSchedule, string> = {
@@ -98,6 +94,21 @@ export const CMHC_SELF_EMPLOYED_BRACKETS: ReadonlyArray<CmhcPremiumBracket> = [
 /** Minimum down payment floor for a self-employed applicant without third-party verification. */
 export const SELF_EMPLOYED_MINIMUM_DOWN_PAYMENT_RATE = 0.1;
 
+/**
+ * The premium rate a table prices this down payment at, or `undefined` when no
+ * bracket covers it. Shared so the server's calculation and the client's "does
+ * this checkbox change anything?" hint read the same tables — the rates can
+ * move without the two disagreeing.
+ */
+export function cmhcBracketRate(
+  brackets: ReadonlyArray<CmhcPremiumBracket>,
+  downPaymentPercent: number,
+): number | undefined {
+  return brackets.find(
+    (b) => downPaymentPercent >= b.minPercent && downPaymentPercent < b.maxPercent,
+  )?.rate;
+}
+
 /** Added to the premium rate when a 30-year amortization is used on an eligible insured mortgage. */
 export const CMHC_THIRTY_YEAR_SURCHARGE = 0.002;
 
@@ -114,10 +125,7 @@ export const MortgageRequestSchema = z
       .number()
       .finite()
       .positive({ message: "propertyPrice must be greater than 0." }),
-    downPayment: z
-      .number()
-      .finite()
-      .nonnegative({ message: "downPayment cannot be negative." }),
+    downPayment: z.number().finite().nonnegative({ message: "downPayment cannot be negative." }),
     annualInterestRate: z
       .number()
       .finite()
@@ -164,8 +172,16 @@ export interface MortgagePaymentResponse {
   /** Portion of `payment` amortizing the financed CMHC premium alone. 0 when not insured. */
   cmhcPayment: number;
   paymentSchedule: PaymentSchedule;
+  amortizationYears: AmortizationYears;
   paymentsPerYear: number;
+  /** Nominal payment count for the schedule: amortizationYears * paymentsPerYear. */
   numberOfPayments: number;
+  /**
+   * Payments actually made before the balance clears. Equal to
+   * `numberOfPayments` for monthly and biweekly; lower for
+   * accelerated-biweekly, which overpays each year and retires the loan early.
+   */
+  actualNumberOfPayments: number;
   minimumDownPayment: number;
   principal: number;
   isInsured: boolean;
@@ -177,16 +193,16 @@ export interface MortgagePaymentResponse {
    * True total amount paid over the life of the mortgage. For monthly and
    * biweekly this is exactly `numberOfPayments * payment`, guaranteed by the
    * amortization formula. For accelerated-biweekly it is NOT that product —
-   * the schedule overpays every year and the loan is paid off before
-   * `numberOfPayments` (which stays nominal, years * 26) is reached, so this
-   * is computed by simulating the real payoff instead.
+   * the schedule overpays every year and the loan is paid off after
+   * `actualNumberOfPayments` rather than the nominal `numberOfPayments`, so
+   * this is computed by simulating the real payoff instead.
    */
   totalMortgage: number;
   /** totalMortgage - totalLoanAmount: total interest paid over the life of the mortgage. */
   totalMortgageInterest: number;
 }
 
-export type MortgageErrorCode = "INVALID_INPUT" | "DOWN_PAYMENT_TOO_LOW";
+export type MortgageErrorCode = "INVALID_INPUT" | "DOWN_PAYMENT_TOO_LOW" | "NOT_FOUND";
 
 export interface ApiErrorBody {
   error: {

@@ -123,8 +123,11 @@ label {
   font-weight: 600;
 }
 
-/* Touch-friendly, full-width controls; 16px min font-size keeps iOS from auto-zooming on focus. */
-input[type="number"],
+/* Touch-friendly, full-width controls; 16px min font-size keeps iOS from auto-zooming on focus.
+   Matched by exclusion rather than by listing each type, so a field that
+   changes type (the amount fields are text inputs, to allow "500,000") keeps
+   the same box instead of silently falling back to the browser default. */
+input:not([type="checkbox"]),
 select {
   width: 100%;
   min-height: 44px;
@@ -136,7 +139,7 @@ select {
   color: var(--color-text);
 }
 
-input[type="number"]:focus,
+input:not([type="checkbox"]):focus,
 select:focus {
   outline: 2px solid var(--color-primary);
   outline-offset: 1px;
@@ -174,6 +177,17 @@ select:focus {
   margin: 0;
   font-size: 0.85rem;
   color: var(--color-muted);
+}
+
+.field-error {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--color-error-text);
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--color-error-border);
 }
 
 button[type="submit"] {

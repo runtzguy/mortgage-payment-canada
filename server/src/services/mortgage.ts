@@ -1,4 +1,5 @@
 import {
+  cmhcBracketRate,
   CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS,
   CMHC_SELF_EMPLOYED_BRACKETS,
   CMHC_STANDARD_BRACKETS,
@@ -78,12 +79,17 @@ export function cmhcPremiumRate(
   if (downPaymentPercent >= INSURED_DOWN_PAYMENT_THRESHOLD) {
     return 0;
   }
-  const bracket = brackets.find(
-    (b) => downPaymentPercent >= b.minPercent && downPaymentPercent < b.maxPercent,
-  );
-  // Falls through only if downPaymentPercent is below the table's lowest bracket,
-  // which effectiveMinimumDownPayment already rejects for each table's floor.
-  let rate = bracket?.rate ?? 0;
+  const bracketRate = cmhcBracketRate(brackets, downPaymentPercent);
+  if (bracketRate === undefined) {
+    // Unreachable: each table's lowest bracket is guarded by the matching
+    // floor in effectiveMinimumDownPayment. If a future rate table leaves a
+    // gap, fail loudly — silently returning 0 would hand out an insured
+    // mortgage with no premium.
+    throw new Error(
+      `No CMHC premium bracket covers a down payment of ${(downPaymentPercent * 100).toFixed(2)}%.`,
+    );
+  }
+  let rate = bracketRate;
   if (amortizationYears === INSURED_THIRTY_YEAR_AMORTIZATION) {
     rate += CMHC_THIRTY_YEAR_SURCHARGE;
   }
@@ -110,32 +116,44 @@ export function amortizedPayment(
 }
 
 function roundToCents(amount: number): number {
-  return Math.round((amount + Number.EPSILON) * 100) / 100;
+  // The epsilon has to be added AFTER scaling: at money magnitudes
+  // `amount + Number.EPSILON === amount`, so nudging before the multiply is a
+  // no-op and does nothing for a value sitting exactly on a .005 boundary.
+  return Math.round(amount * 100 + Number.EPSILON) / 100;
+}
+
+export interface AcceleratedPayoff {
+  /** Total amount handed over across the whole payoff. */
+  totalPaid: number;
+  /** Payments actually made before the balance cleared. */
+  periods: number;
 }
 
 /**
- * True total paid over the life of an accelerated bi-weekly mortgage,
- * simulated period by period: interest accrues on the outstanding balance at
- * the bi-weekly periodic rate, then the fixed accelerated payment is applied.
- * The loan is paid off in fewer than the nominal `years * 26` periods because
- * that fixed payment (half the monthly payment, paid 26x/year) overpays
- * relative to what a true bi-weekly amortization at that rate would need —
- * that's what "accelerated" means. The final period's payment is capped to
- * exactly clear the remaining balance rather than overshooting it.
+ * True payoff of an accelerated bi-weekly mortgage, simulated period by
+ * period: interest accrues on the outstanding balance at the bi-weekly
+ * periodic rate, then the fixed accelerated payment is applied. The loan is
+ * paid off in fewer than the nominal `years * 26` periods because that fixed
+ * payment (half the monthly payment, paid 26x/year) overpays relative to what
+ * a true bi-weekly amortization at that rate would need — that's what
+ * "accelerated" means. The final period's payment is capped to exactly clear
+ * the remaining balance rather than overshooting it.
  */
 export function simulateAcceleratedBiweeklyPayoff(
   totalLoanAmount: number,
   fixedPayment: number,
   annualRateDecimal: number,
-): number {
+): AcceleratedPayoff {
   const biweeklyRate = periodicRate(annualRateDecimal, 26);
   let balance = totalLoanAmount;
   let totalPaid = 0;
+  let periods = 0;
   // Safety cap: a well-formed accelerated schedule always pays off well
   // within the longest allowed nominal term (30 years of biweekly periods).
   const maxIterations = 30 * 26;
-  for (let i = 0; i < maxIterations && balance > 0; i++) {
+  while (balance > 0 && periods < maxIterations) {
     balance += balance * biweeklyRate;
+    periods += 1;
     if (balance <= fixedPayment) {
       totalPaid += balance;
       balance = 0;
@@ -148,7 +166,7 @@ export function simulateAcceleratedBiweeklyPayoff(
   if (balance > 0) {
     totalPaid += balance;
   }
-  return totalPaid;
+  return { totalPaid, periods };
 }
 
 export function calculateMortgagePayment(request: MortgageRequest): MortgagePaymentResponse {
@@ -231,14 +249,23 @@ export function calculateMortgagePayment(request: MortgageRequest): MortgagePaym
   const totalLoanAmountRounded = roundToCents(totalLoanAmount);
 
   // For monthly/biweekly, numberOfPayments * payment is exact by construction
-  // (that's what the amortization formula solved for). Accelerated-biweekly
-  // pays off before its nominal numberOfPayments, so it needs simulation —
-  // see simulateAcceleratedBiweeklyPayoff for why.
-  const totalMortgage = roundToCents(
-    paymentSchedule === "accelerated-biweekly"
-      ? simulateAcceleratedBiweeklyPayoff(totalLoanAmountRounded, payment, annualRateDecimal)
-      : numberOfPayments * payment,
-  );
+  // (that's what the amortization formula solved for) and every payment is
+  // made. Accelerated-biweekly pays off before its nominal numberOfPayments,
+  // so it needs simulation — see simulateAcceleratedBiweeklyPayoff for why.
+  let totalMortgage: number;
+  let actualNumberOfPayments: number;
+  if (paymentSchedule === "accelerated-biweekly") {
+    const payoff = simulateAcceleratedBiweeklyPayoff(
+      totalLoanAmountRounded,
+      payment,
+      annualRateDecimal,
+    );
+    totalMortgage = roundToCents(payoff.totalPaid);
+    actualNumberOfPayments = payoff.periods;
+  } else {
+    totalMortgage = roundToCents(numberOfPayments * payment);
+    actualNumberOfPayments = numberOfPayments;
+  }
   const totalMortgageInterest = roundToCents(totalMortgage - totalLoanAmountRounded);
 
   return {
@@ -246,8 +273,10 @@ export function calculateMortgagePayment(request: MortgageRequest): MortgagePaym
     mortgagePayment,
     cmhcPayment,
     paymentSchedule,
+    amortizationYears,
     paymentsPerYear,
     numberOfPayments,
+    actualNumberOfPayments,
     minimumDownPayment: roundToCents(minDownPayment),
     principal: roundToCents(principal),
     isInsured,

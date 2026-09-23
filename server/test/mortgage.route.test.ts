@@ -126,4 +126,50 @@ describe("POST /api/mortgage/payment", () => {
     const naiveTotal = res.body.numberOfPayments * res.body.payment;
     expect(res.body.totalMortgage).toBeLessThan(naiveTotal);
   });
+
+  it("returns the real payoff count alongside the nominal one for accelerated-biweekly", async () => {
+    const res = await request(app)
+      .post("/api/mortgage/payment")
+      .send({ ...validBody, paymentSchedule: "accelerated-biweekly" });
+    expect(res.status).toBe(200);
+    expect(res.body.numberOfPayments).toBe(650);
+    expect(res.body.actualNumberOfPayments).toBeLessThan(650);
+    expect(res.body.amortizationYears).toBe(25);
+  });
+
+  it("echoes the amortization and an unchanged payment count for monthly", async () => {
+    const res = await request(app).post("/api/mortgage/payment").send(validBody);
+    expect(res.status).toBe(200);
+    expect(res.body.amortizationYears).toBe(25);
+    expect(res.body.actualNumberOfPayments).toBe(res.body.numberOfPayments);
+  });
+
+  it("returns 400 INVALID_INPUT for a malformed JSON body, not 500", async () => {
+    const res = await request(app)
+      .post("/api/mortgage/payment")
+      .set("Content-Type", "application/json")
+      .send("{not valid json");
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_INPUT");
+  });
+});
+
+describe("API surface", () => {
+  it("returns 200 from the health check", async () => {
+    const res = await request(app).get("/api/health");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+  });
+
+  it("returns a JSON 404 for an unknown /api route, not Express's HTML page", async () => {
+    const res = await request(app).post("/api/mortgage/nope").send({});
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("NOT_FOUND");
+  });
+
+  it("returns a JSON 404 for the wrong method on the payment route", async () => {
+    const res = await request(app).get("/api/mortgage/payment");
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("NOT_FOUND");
+  });
 });
