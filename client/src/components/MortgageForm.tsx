@@ -71,7 +71,6 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
           type="number"
           inputMode="decimal"
           min={0}
-          step="0.01"
           required
           value={form.propertyPrice}
           onChange={(e) => setForm((f) => ({ ...f, propertyPrice: e.target.value }))}
@@ -85,7 +84,6 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
           type="number"
           inputMode="decimal"
           min={0}
-          step="0.01"
           required
           value={form.downPayment}
           onChange={(e) => setForm((f) => ({ ...f, downPayment: e.target.value }))}
