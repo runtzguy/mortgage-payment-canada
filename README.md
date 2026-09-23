@@ -92,7 +92,9 @@ Request body:
   "isInsured": true,
   "cmhcPremiumRate": 0.031,
   "cmhcPremium": 13950,
-  "totalLoanAmount": 463950
+  "totalLoanAmount": 463950,
+  "totalMortgage": 809505,
+  "totalMortgageInterest": 345555
 }
 ```
 
@@ -102,6 +104,14 @@ Request body:
   `false`, `cmhcPayment` is `0` and `mortgagePayment` equals `payment`.
 - `cmhcPremium` (singular, no "Payment") is the one-time premium amount financed into the loan —
   not paid up front, but the lump sum that `cmhcPayment` amortizes over the term.
+- `totalMortgage` is the true total paid over the life of the mortgage; `totalMortgageInterest`
+  is `totalMortgage - totalLoanAmount`. For `monthly` and `biweekly` this is exactly
+  `numberOfPayments * payment` — guaranteed by the amortization formula. For
+  `accelerated-biweekly` it is **not** that product: that schedule overpays every year (the
+  equivalent of 13 monthly payments instead of 12) and pays the loan off before the nominal
+  `numberOfPayments` (`years * 26`) is reached, so `totalMortgage` is computed by simulating the
+  real payoff period-by-period instead (see `simulateAcceleratedBiweeklyPayoff` in
+  `server/src/services/mortgage.ts`).
 
 400 response:
 

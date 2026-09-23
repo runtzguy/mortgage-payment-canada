@@ -33,6 +33,9 @@ export function PaymentResult({ result, errorMessage, isLoading }: PaymentResult
     );
   }
 
+  const amortizationYears = Math.round(result.numberOfPayments / result.paymentsPerYear);
+  const isAccelerated = result.paymentSchedule === "accelerated-biweekly";
+
   return (
     <div className="result-panel">
       <h2>{PAYMENT_SCHEDULE_LABELS[result.paymentSchedule]} payment</h2>
@@ -58,6 +61,10 @@ export function PaymentResult({ result, errorMessage, isLoading }: PaymentResult
           <dd>{result.numberOfPayments}</dd>
         </div>
         <div>
+          <dt>Total Mortgage at {amortizationYears} years</dt>
+          <dd>{currency.format(result.totalMortgage)}</dd>
+        </div>
+        <div>
           <dt>Base principal</dt>
           <dd>{currency.format(result.principal)}</dd>
         </div>
@@ -69,13 +76,25 @@ export function PaymentResult({ result, errorMessage, isLoading }: PaymentResult
           <dt>Total principal</dt>
           <dd>{currency.format(result.totalLoanAmount)}</dd>
         </div>
+        <div>
+          <dt>Total Mortgage Interest</dt>
+          <dd>{currency.format(result.totalMortgageInterest)}</dd>
+        </div>
       </dl>
+
+      {isAccelerated && (
+        <p className="field-hint">
+          Accelerated bi-weekly pays off the mortgage faster than the {amortizationYears}-year
+          term shown above, so Total Mortgage reflects that shorter, real payoff — not{" "}
+          {result.numberOfPayments} payments.
+        </p>
+      )}
     </div>
   );
 }
 
 /**
- * Mirrors the real result's structure (heading, 3 breakdown rows, 4 detail
+ * Mirrors the real result's structure (heading, 3 breakdown rows, 6 detail
  * rows) so the panel doesn't change size when the real content arrives.
  */
 function PaymentResultSkeleton() {
@@ -106,7 +125,7 @@ function PaymentResultSkeleton() {
       </div>
 
       <dl className="result-details" aria-hidden="true">
-        {Array.from({ length: 4 }, (_, i) => (
+        {Array.from({ length: 6 }, (_, i) => (
           <div key={i}>
             <dt>
               <span className="skeleton skeleton-text skeleton-text--label" />

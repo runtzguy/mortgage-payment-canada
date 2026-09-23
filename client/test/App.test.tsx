@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { MortgagePaymentResponse } from "@benjipays/shared";
 import { App } from "../src/App";
 
 afterEach(() => {
@@ -16,6 +17,27 @@ function jsonResponse(body: unknown, status = 200) {
   } as Response;
 }
 
+/** A valid, internally-consistent $400k-uninsured-monthly response; override fields per test. */
+function baseResponse(overrides: Partial<MortgagePaymentResponse> = {}): MortgagePaymentResponse {
+  return {
+    payment: 2326.42,
+    mortgagePayment: 2326.42,
+    cmhcPayment: 0,
+    paymentSchedule: "monthly",
+    paymentsPerYear: 12,
+    numberOfPayments: 300,
+    minimumDownPayment: 25000,
+    principal: 400000,
+    isInsured: false,
+    cmhcPremiumRate: 0,
+    cmhcPremium: 0,
+    totalLoanAmount: 400000,
+    totalMortgage: 697926,
+    totalMortgageInterest: 297926,
+    ...overrides,
+  };
+}
+
 async function fillRequiredFields(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("Property price ($)"), "500000");
   await user.type(screen.getByLabelText("Down payment ($)"), "100000");
@@ -24,22 +46,7 @@ async function fillRequiredFields(user: ReturnType<typeof userEvent.setup>) {
 
 describe("App", () => {
   it("submits the form and shows the payment on success (uninsured)", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        payment: 2326.42,
-        mortgagePayment: 2326.42,
-        cmhcPayment: 0,
-        paymentSchedule: "monthly",
-        paymentsPerYear: 12,
-        numberOfPayments: 300,
-        minimumDownPayment: 25000,
-        principal: 400000,
-        isInsured: false,
-        cmhcPremiumRate: 0,
-        cmhcPremium: 0,
-        totalLoanAmount: 400000,
-      }),
-    );
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse()));
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();
@@ -64,20 +71,20 @@ describe("App", () => {
 
   it("shows the mortgage payment and CMHC payment separately, adding to the total (insured)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        payment: 2698.35,
-        mortgagePayment: 2617.22,
-        cmhcPayment: 81.13,
-        paymentSchedule: "monthly",
-        paymentsPerYear: 12,
-        numberOfPayments: 300,
-        minimumDownPayment: 25000,
-        principal: 450000,
-        isInsured: true,
-        cmhcPremiumRate: 0.031,
-        cmhcPremium: 13950,
-        totalLoanAmount: 463950,
-      }),
+      jsonResponse(
+        baseResponse({
+          payment: 2698.35,
+          mortgagePayment: 2617.22,
+          cmhcPayment: 81.13,
+          principal: 450000,
+          isInsured: true,
+          cmhcPremiumRate: 0.031,
+          cmhcPremium: 13950,
+          totalLoanAmount: 463950,
+          totalMortgage: 809505,
+          totalMortgageInterest: 345555,
+        }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -99,6 +106,58 @@ describe("App", () => {
     expect(screen.getByText("$2,698.35")).toBeInTheDocument();
   });
 
+  it("shows Total Mortgage (at the selected years) and Total Mortgage Interest", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole("button", { name: /calculate payment/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Total Mortgage at 25 years")).toBeInTheDocument();
+    });
+    expect(screen.getByText("$697,926.00")).toBeInTheDocument();
+    expect(screen.getByText("Total Mortgage Interest")).toBeInTheDocument();
+    expect(screen.getByText("$297,926.00")).toBeInTheDocument();
+    // No accelerated-biweekly caveat for a monthly result.
+    expect(screen.queryByText(/pays off the mortgage faster/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the accelerated bi-weekly caveat and its simulated (not naive) Total Mortgage", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        baseResponse({
+          payment: 1163.21,
+          mortgagePayment: 1163.21,
+          paymentSchedule: "accelerated-biweekly",
+          paymentsPerYear: 26,
+          numberOfPayments: 650,
+          totalMortgage: 649577.28,
+          totalMortgageInterest: 249577.28,
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await fillRequiredFields(user);
+    await user.selectOptions(screen.getByLabelText(/payment schedule/i), "accelerated-biweekly");
+    await user.click(screen.getByRole("button", { name: /calculate payment/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Total Mortgage at 25 years")).toBeInTheDocument();
+    });
+    expect(screen.getByText("$649,577.28")).toBeInTheDocument();
+    // naive would be 650 * 1163.21 = 756,086.50 — must not show that instead.
+    expect(screen.queryByText("$756,086.50")).not.toBeInTheDocument();
+    expect(screen.getByText(/pays off the mortgage faster/i)).toBeInTheDocument();
+  });
+
   it("shows a skeleton loader while the request is in flight, then the result", async () => {
     let resolveFetch!: (response: Response) => void;
     const fetchMock = vi.fn().mockReturnValue(
@@ -118,22 +177,7 @@ describe("App", () => {
     expect(screen.getByRole("status", { name: /calculating payment/i })).toBeInTheDocument();
     expect(screen.queryByText("Mortgage payment")).not.toBeInTheDocument();
 
-    resolveFetch(
-      jsonResponse({
-        payment: 2326.42,
-        mortgagePayment: 2326.42,
-        cmhcPayment: 0,
-        paymentSchedule: "monthly",
-        paymentsPerYear: 12,
-        numberOfPayments: 300,
-        minimumDownPayment: 25000,
-        principal: 400000,
-        isInsured: false,
-        cmhcPremiumRate: 0,
-        cmhcPremium: 0,
-        totalLoanAmount: 400000,
-      }),
-    );
+    resolveFetch(jsonResponse(baseResponse()));
 
     // Once resolved: skeleton is gone, real content is shown.
     await waitFor(() => {
@@ -143,22 +187,7 @@ describe("App", () => {
   });
 
   it("renders the Buyer Info checkboxes and sends them in the request body when checked", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        payment: 2326.42,
-        mortgagePayment: 2326.42,
-        cmhcPayment: 0,
-        paymentSchedule: "monthly",
-        paymentsPerYear: 12,
-        numberOfPayments: 300,
-        minimumDownPayment: 25000,
-        principal: 400000,
-        isInsured: false,
-        cmhcPremiumRate: 0,
-        cmhcPremium: 0,
-        totalLoanAmount: 400000,
-      }),
-    );
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse()));
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();
@@ -183,22 +212,7 @@ describe("App", () => {
   });
 
   it("defaults the Buyer Info fields to false when left unchecked", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        payment: 2326.42,
-        mortgagePayment: 2326.42,
-        cmhcPayment: 0,
-        paymentSchedule: "monthly",
-        paymentsPerYear: 12,
-        numberOfPayments: 300,
-        minimumDownPayment: 25000,
-        principal: 400000,
-        isInsured: false,
-        cmhcPremiumRate: 0,
-        cmhcPremium: 0,
-        totalLoanAmount: 400000,
-      }),
-    );
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse()));
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();

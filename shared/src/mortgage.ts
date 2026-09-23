@@ -173,6 +173,17 @@ export interface MortgagePaymentResponse {
   /** One-time CMHC premium amount, financed into totalLoanAmount (not paid up front). */
   cmhcPremium: number;
   totalLoanAmount: number;
+  /**
+   * True total amount paid over the life of the mortgage. For monthly and
+   * biweekly this is exactly `numberOfPayments * payment`, guaranteed by the
+   * amortization formula. For accelerated-biweekly it is NOT that product —
+   * the schedule overpays every year and the loan is paid off before
+   * `numberOfPayments` (which stays nominal, years * 26) is reached, so this
+   * is computed by simulating the real payoff instead.
+   */
+  totalMortgage: number;
+  /** totalMortgage - totalLoanAmount: total interest paid over the life of the mortgage. */
+  totalMortgageInterest: number;
 }
 
 export type MortgageErrorCode = "INVALID_INPUT" | "DOWN_PAYMENT_TOO_LOW";

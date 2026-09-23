@@ -7,6 +7,7 @@ import {
   minimumDownPayment,
   periodicRate,
   selectCmhcBracketTable,
+  simulateAcceleratedBiweeklyPayoff,
 } from "../src/services/mortgage.js";
 import { DownPaymentTooLowError, InvalidInputError } from "../src/errors.js";
 import {
@@ -173,6 +174,30 @@ describe("amortizedPayment", () => {
   });
 });
 
+describe("simulateAcceleratedBiweeklyPayoff", () => {
+  it("pays off in fewer than the nominal years*26 periods (that's what makes it accelerated)", () => {
+    // $400k loan, $1,163.21 accelerated payment (half the monthly payment for
+    // this loan at 5%/25y), 5% rate: nominal is 25*26 = 650 periods.
+    const totalPaid = simulateAcceleratedBiweeklyPayoff(400_000, 1163.21, 0.05);
+    const naiveTotal = 1163.21 * 650;
+    expect(totalPaid).toBeLessThan(naiveTotal);
+  });
+
+  it("matches the hand-computed reference: 559 periods, $649,577.28 total", () => {
+    // Cross-checked independently: simulateAcceleratedBiweeklyPayoff should
+    // reproduce this within a cent of rounding.
+    const totalPaid = simulateAcceleratedBiweeklyPayoff(400_000, 1163.21, 0.05);
+    expect(totalPaid).toBeCloseTo(649_577.28, 1);
+  });
+
+  it("returns exactly the loan amount when the rate is 0", () => {
+    // 400,000 / (1163.21ish) periods, but at 0% interest total paid == principal exactly
+    // (no interest to accrue), regardless of how many periods it takes.
+    const totalPaid = simulateAcceleratedBiweeklyPayoff(400_000, 2000, 0);
+    expect(totalPaid).toBeCloseTo(400_000, 5);
+  });
+});
+
 describe("calculateMortgagePayment", () => {
   it("computes the monthly payment for an uninsured mortgage (20% down)", () => {
     const result = calculateMortgagePayment(request());
@@ -187,6 +212,11 @@ describe("calculateMortgagePayment", () => {
     expect(result.cmhcPayment).toBe(0);
     expect(result.numberOfPayments).toBe(300);
     expect(result.paymentsPerYear).toBe(12);
+    // Monthly: totalMortgage is exactly numberOfPayments * payment.
+    expect(result.totalMortgage).toBe(697_926);
+    expect(result.totalMortgageInterest).toBe(297_926);
+    expect(result.totalMortgage).toBe(result.numberOfPayments * result.payment);
+    expect(result.totalMortgageInterest).toBe(result.totalMortgage - result.totalLoanAmount);
   });
 
   it("computes the bi-weekly payment", () => {
@@ -203,6 +233,31 @@ describe("calculateMortgagePayment", () => {
     // Accelerated is strictly more per year than regular bi-weekly (that's what makes it "accelerated").
     const biweekly = calculateMortgagePayment(request({ paymentSchedule: "biweekly" }));
     expect(result.payment).toBeGreaterThan(biweekly.payment);
+  });
+
+  it("computes accelerated bi-weekly's totalMortgage via simulated payoff, not numberOfPayments * payment", () => {
+    const result = calculateMortgagePayment(request({ paymentSchedule: "accelerated-biweekly" }));
+    const naiveTotal = result.numberOfPayments * result.payment; // 650 * 1163.21 = 756,086.50
+    // The true payoff finishes early, so totalMortgage is meaningfully less than the naive product —
+    // this is the whole point of the accelerated schedule, and exactly what the simulation is for.
+    expect(result.totalMortgage).toBeLessThan(naiveTotal);
+    expect(naiveTotal - result.totalMortgage).toBeGreaterThan(50_000); // not just a rounding difference
+    expect(result.totalMortgage).toBeCloseTo(649_577.28, 1);
+    expect(result.totalMortgageInterest).toBeCloseTo(249_577.28, 1);
+    expect(result.totalMortgageInterest).toBeCloseTo(
+      result.totalMortgage - result.totalLoanAmount,
+      10, // floating-point noise from subtracting two already-rounded numbers
+    );
+  });
+
+  it("makes monthly's totalMortgage match accelerated bi-weekly's simulated totalMortgage closely (same loan, faster accelerated payoff pays less interest)", () => {
+    const monthly = calculateMortgagePayment(request({ paymentSchedule: "monthly" }));
+    const accelerated = calculateMortgagePayment(
+      request({ paymentSchedule: "accelerated-biweekly" }),
+    );
+    // Accelerated bi-weekly's real-world benefit: less total interest than monthly,
+    // because the built-in extra payment each year pays the loan off early.
+    expect(accelerated.totalMortgageInterest).toBeLessThan(monthly.totalMortgageInterest);
   });
 
   it("adds the CMHC premium to the loan amount for an insured mortgage (10% down)", () => {

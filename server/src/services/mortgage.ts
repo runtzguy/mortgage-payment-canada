@@ -113,6 +113,44 @@ function roundToCents(amount: number): number {
   return Math.round((amount + Number.EPSILON) * 100) / 100;
 }
 
+/**
+ * True total paid over the life of an accelerated bi-weekly mortgage,
+ * simulated period by period: interest accrues on the outstanding balance at
+ * the bi-weekly periodic rate, then the fixed accelerated payment is applied.
+ * The loan is paid off in fewer than the nominal `years * 26` periods because
+ * that fixed payment (half the monthly payment, paid 26x/year) overpays
+ * relative to what a true bi-weekly amortization at that rate would need —
+ * that's what "accelerated" means. The final period's payment is capped to
+ * exactly clear the remaining balance rather than overshooting it.
+ */
+export function simulateAcceleratedBiweeklyPayoff(
+  totalLoanAmount: number,
+  fixedPayment: number,
+  annualRateDecimal: number,
+): number {
+  const biweeklyRate = periodicRate(annualRateDecimal, 26);
+  let balance = totalLoanAmount;
+  let totalPaid = 0;
+  // Safety cap: a well-formed accelerated schedule always pays off well
+  // within the longest allowed nominal term (30 years of biweekly periods).
+  const maxIterations = 30 * 26;
+  for (let i = 0; i < maxIterations && balance > 0; i++) {
+    balance += balance * biweeklyRate;
+    if (balance <= fixedPayment) {
+      totalPaid += balance;
+      balance = 0;
+    } else {
+      balance -= fixedPayment;
+      totalPaid += fixedPayment;
+    }
+  }
+  // Defensive fallback; should be unreachable given how the payment is sized.
+  if (balance > 0) {
+    totalPaid += balance;
+  }
+  return totalPaid;
+}
+
 export function calculateMortgagePayment(request: MortgageRequest): MortgagePaymentResponse {
   const {
     propertyPrice,
@@ -190,6 +228,18 @@ export function calculateMortgagePayment(request: MortgageRequest): MortgagePaym
   const mortgagePayment = roundToCents(mortgagePaymentRaw);
   const cmhcPayment = roundToCents(cmhcPaymentRaw);
   const payment = roundToCents(mortgagePayment + cmhcPayment);
+  const totalLoanAmountRounded = roundToCents(totalLoanAmount);
+
+  // For monthly/biweekly, numberOfPayments * payment is exact by construction
+  // (that's what the amortization formula solved for). Accelerated-biweekly
+  // pays off before its nominal numberOfPayments, so it needs simulation —
+  // see simulateAcceleratedBiweeklyPayoff for why.
+  const totalMortgage = roundToCents(
+    paymentSchedule === "accelerated-biweekly"
+      ? simulateAcceleratedBiweeklyPayoff(totalLoanAmountRounded, payment, annualRateDecimal)
+      : numberOfPayments * payment,
+  );
+  const totalMortgageInterest = roundToCents(totalMortgage - totalLoanAmountRounded);
 
   return {
     payment,
@@ -203,6 +253,8 @@ export function calculateMortgagePayment(request: MortgageRequest): MortgagePaym
     isInsured,
     cmhcPremiumRate: rate,
     cmhcPremium: roundToCents(premium),
-    totalLoanAmount: roundToCents(totalLoanAmount),
+    totalLoanAmount: totalLoanAmountRounded,
+    totalMortgage,
+    totalMortgageInterest,
   };
 }

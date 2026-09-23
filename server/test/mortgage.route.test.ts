@@ -107,4 +107,23 @@ describe("POST /api/mortgage/payment", () => {
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("DOWN_PAYMENT_TOO_LOW");
   });
+
+  it("returns totalMortgage as numberOfPayments * payment for monthly", async () => {
+    const res = await request(app).post("/api/mortgage/payment").send(validBody);
+    expect(res.status).toBe(200);
+    expect(res.body.totalMortgage).toBe(res.body.numberOfPayments * res.body.payment);
+    expect(res.body.totalMortgageInterest).toBeCloseTo(
+      res.body.totalMortgage - res.body.totalLoanAmount,
+      10,
+    );
+  });
+
+  it("returns a simulated (lower) totalMortgage for accelerated-biweekly, not numberOfPayments * payment", async () => {
+    const res = await request(app)
+      .post("/api/mortgage/payment")
+      .send({ ...validBody, paymentSchedule: "accelerated-biweekly" });
+    expect(res.status).toBe(200);
+    const naiveTotal = res.body.numberOfPayments * res.body.payment;
+    expect(res.body.totalMortgage).toBeLessThan(naiveTotal);
+  });
 });
