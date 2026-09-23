@@ -58,7 +58,7 @@ export function PaymentResult({ result, errorMessage, isLoading }: PaymentResult
           <dd>{result.numberOfPayments}</dd>
         </div>
         <div>
-          <dt>Loan principal</dt>
+          <dt>Base principal</dt>
           <dd>{currency.format(result.principal)}</dd>
         </div>
         <div>
@@ -66,7 +66,7 @@ export function PaymentResult({ result, errorMessage, isLoading }: PaymentResult
           <dd>{currency.format(result.cmhcPremium)}</dd>
         </div>
         <div>
-          <dt>Total loan amount</dt>
+          <dt>Total principal</dt>
           <dd>{currency.format(result.totalLoanAmount)}</dd>
         </div>
       </dl>
