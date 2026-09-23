@@ -17,6 +17,8 @@ interface FormState {
   paymentSchedule: PaymentSchedule;
   isFirstTimeHomeBuyer: boolean;
   isNewConstruction: boolean;
+  hasNonTraditionalDownPayment: boolean;
+  isSelfEmployedNonVerifiedIncome: boolean;
 }
 
 const initialState: FormState = {
@@ -27,6 +29,8 @@ const initialState: FormState = {
   paymentSchedule: "monthly",
   isFirstTimeHomeBuyer: false,
   isNewConstruction: false,
+  hasNonTraditionalDownPayment: false,
+  isSelfEmployedNonVerifiedIncome: false,
 };
 
 interface MortgageFormProps {
@@ -53,6 +57,8 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
       paymentSchedule: form.paymentSchedule,
       isFirstTimeHomeBuyer: form.isFirstTimeHomeBuyer,
       isNewConstruction: form.isNewConstruction,
+      hasNonTraditionalDownPayment: form.hasNonTraditionalDownPayment,
+      isSelfEmployedNonVerifiedIncome: form.isSelfEmployedNonVerifiedIncome,
     });
   }
 
@@ -139,6 +145,30 @@ export function MortgageForm({ onSubmit, isSubmitting }: MortgageFormProps) {
           </select>
         </div>
       </div>
+
+      <fieldset className="eligibility-fields">
+        <legend>Buyer Info</legend>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={form.hasNonTraditionalDownPayment}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, hasNonTraditionalDownPayment: e.target.checked }))
+            }
+          />
+          Down payment includes borrowed funds and gift from non-immediate family members?
+        </label>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={form.isSelfEmployedNonVerifiedIncome}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, isSelfEmployedNonVerifiedIncome: e.target.checked }))
+            }
+          />
+          Self-Employed without third party verification?
+        </label>
+      </fieldset>
 
       <fieldset className="eligibility-fields">
         <legend>Buyer eligibility</legend>

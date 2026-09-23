@@ -55,23 +55,48 @@ export const MIN_DOWN_PAYMENT_TIER_3_RATE = 0.2;
 /** A mortgage is insured when the down payment is under this fraction of the price. */
 export const INSURED_DOWN_PAYMENT_THRESHOLD = 0.2;
 
-/**
- * Standard CMHC premium rate by down payment percentage. Traditional down
- * payment sources with verified/documented income only; does not cover
- * non-traditional down payment sources or self-employed/non-verified income,
- * which CMHC prices on a different schedule.
- */
-export const CMHC_PREMIUM_BRACKETS: ReadonlyArray<{
+export interface CmhcPremiumBracket {
   /** Inclusive lower bound, as a fraction of price (0.05 = 5%). */
   minPercent: number;
   /** Exclusive upper bound, as a fraction of price. */
   maxPercent: number;
   rate: number;
-}> = [
+}
+
+/**
+ * Standard CMHC premium rate by down payment percentage. Traditional down
+ * payment sources with verified/documented income only.
+ */
+export const CMHC_STANDARD_BRACKETS: ReadonlyArray<CmhcPremiumBracket> = [
   { minPercent: 0.05, maxPercent: 0.1, rate: 0.04 },
   { minPercent: 0.1, maxPercent: 0.15, rate: 0.031 },
   { minPercent: 0.15, maxPercent: INSURED_DOWN_PAYMENT_THRESHOLD, rate: 0.028 },
 ];
+
+/**
+ * CMHC premium rate when the down payment includes borrowed funds or a gift
+ * from a non-immediate family member. Only the 5–9.99% bracket differs from
+ * the standard table (4.50% vs 4.00%); 10%+ is priced the same as standard.
+ */
+export const CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS: ReadonlyArray<CmhcPremiumBracket> = [
+  { minPercent: 0.05, maxPercent: 0.1, rate: 0.045 },
+  { minPercent: 0.1, maxPercent: 0.15, rate: 0.031 },
+  { minPercent: 0.15, maxPercent: INSURED_DOWN_PAYMENT_THRESHOLD, rate: 0.028 },
+];
+
+/**
+ * CMHC premium rate for a self-employed applicant without third-party income
+ * verification. No 5–9.99% bracket: SELF_EMPLOYED_MINIMUM_DOWN_PAYMENT_RATE
+ * makes that range unreachable. Takes priority over the non-traditional
+ * down payment table when both apply.
+ */
+export const CMHC_SELF_EMPLOYED_BRACKETS: ReadonlyArray<CmhcPremiumBracket> = [
+  { minPercent: 0.1, maxPercent: 0.15, rate: 0.0475 },
+  { minPercent: 0.15, maxPercent: INSURED_DOWN_PAYMENT_THRESHOLD, rate: 0.029 },
+];
+
+/** Minimum down payment floor for a self-employed applicant without third-party verification. */
+export const SELF_EMPLOYED_MINIMUM_DOWN_PAYMENT_RATE = 0.1;
 
 /** Added to the premium rate when a 30-year amortization is used on an eligible insured mortgage. */
 export const CMHC_THIRTY_YEAR_SURCHARGE = 0.002;
@@ -117,6 +142,8 @@ export const MortgageRequestSchema = z
     }),
     isFirstTimeHomeBuyer: z.boolean().optional().default(false),
     isNewConstruction: z.boolean().optional().default(false),
+    hasNonTraditionalDownPayment: z.boolean().optional().default(false),
+    isSelfEmployedNonVerifiedIncome: z.boolean().optional().default(false),
   })
   .refine((data) => data.downPayment < data.propertyPrice, {
     message: "downPayment must be less than propertyPrice.",

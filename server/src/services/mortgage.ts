@@ -1,5 +1,7 @@
 import {
-  CMHC_PREMIUM_BRACKETS,
+  CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS,
+  CMHC_SELF_EMPLOYED_BRACKETS,
+  CMHC_STANDARD_BRACKETS,
   CMHC_THIRTY_YEAR_SURCHARGE,
   INSURED_DOWN_PAYMENT_THRESHOLD,
   INSURED_THIRTY_YEAR_AMORTIZATION,
@@ -9,6 +11,8 @@ import {
   MIN_DOWN_PAYMENT_TIER_2_RATE,
   MIN_DOWN_PAYMENT_TIER_3_RATE,
   PAYMENTS_PER_YEAR,
+  SELF_EMPLOYED_MINIMUM_DOWN_PAYMENT_RATE,
+  type CmhcPremiumBracket,
   type MortgagePaymentResponse,
   type MortgageRequest,
 } from "@benjipays/shared";
@@ -29,18 +33,56 @@ export function minimumDownPayment(propertyPrice: number): number {
   return propertyPrice * MIN_DOWN_PAYMENT_TIER_3_RATE;
 }
 
+/**
+ * Minimum down payment actually required, given the standard tiered rule plus
+ * the self-employed (non-verified income) floor of 10% when it applies. The
+ * floor is a `max`, not a replacement: it only raises the requirement (it's
+ * stricter than the standard tiered minimum everywhere below $1.5M) and never
+ * lowers the existing 20% minimum at $1.5M+.
+ */
+export function effectiveMinimumDownPayment(
+  propertyPrice: number,
+  isSelfEmployedNonVerifiedIncome: boolean,
+): number {
+  const standardMinimum = minimumDownPayment(propertyPrice);
+  if (!isSelfEmployedNonVerifiedIncome) {
+    return standardMinimum;
+  }
+  return Math.max(standardMinimum, propertyPrice * SELF_EMPLOYED_MINIMUM_DOWN_PAYMENT_RATE);
+}
+
+/**
+ * Which CMHC premium bracket table applies. Self-employed (non-verified
+ * income) takes priority when both flags are set — its rules, including the
+ * minimum down payment floor, fully supersede the non-traditional table.
+ */
+export function selectCmhcBracketTable(
+  hasNonTraditionalDownPayment: boolean,
+  isSelfEmployedNonVerifiedIncome: boolean,
+): ReadonlyArray<CmhcPremiumBracket> {
+  if (isSelfEmployedNonVerifiedIncome) {
+    return CMHC_SELF_EMPLOYED_BRACKETS;
+  }
+  if (hasNonTraditionalDownPayment) {
+    return CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS;
+  }
+  return CMHC_STANDARD_BRACKETS;
+}
+
 /** CMHC premium rate for a given down payment percentage and amortization. 0 when not insured. */
 export function cmhcPremiumRate(
   downPaymentPercent: number,
   amortizationYears: number,
+  brackets: ReadonlyArray<CmhcPremiumBracket> = CMHC_STANDARD_BRACKETS,
 ): number {
   if (downPaymentPercent >= INSURED_DOWN_PAYMENT_THRESHOLD) {
     return 0;
   }
-  const bracket = CMHC_PREMIUM_BRACKETS.find(
+  const bracket = brackets.find(
     (b) => downPaymentPercent >= b.minPercent && downPaymentPercent < b.maxPercent,
   );
-  // Falls through only if downPaymentPercent < 5%, which minimumDownPayment already rejects.
+  // Falls through only if downPaymentPercent is below the table's lowest bracket,
+  // which effectiveMinimumDownPayment already rejects for each table's floor.
   let rate = bracket?.rate ?? 0;
   if (amortizationYears === INSURED_THIRTY_YEAR_AMORTIZATION) {
     rate += CMHC_THIRTY_YEAR_SURCHARGE;
@@ -80,9 +122,14 @@ export function calculateMortgagePayment(request: MortgageRequest): MortgagePaym
     paymentSchedule,
     isFirstTimeHomeBuyer,
     isNewConstruction,
+    hasNonTraditionalDownPayment,
+    isSelfEmployedNonVerifiedIncome,
   } = request;
 
-  const minDownPayment = minimumDownPayment(propertyPrice);
+  const minDownPayment = effectiveMinimumDownPayment(
+    propertyPrice,
+    isSelfEmployedNonVerifiedIncome,
+  );
   if (downPayment < minDownPayment) {
     throw new DownPaymentTooLowError(propertyPrice, minDownPayment);
   }
@@ -101,7 +148,11 @@ export function calculateMortgagePayment(request: MortgageRequest): MortgagePaym
     }
   }
 
-  const rate = isInsured ? cmhcPremiumRate(downPaymentPercent, amortizationYears) : 0;
+  const brackets = selectCmhcBracketTable(
+    hasNonTraditionalDownPayment,
+    isSelfEmployedNonVerifiedIncome,
+  );
+  const rate = isInsured ? cmhcPremiumRate(downPaymentPercent, amortizationYears, brackets) : 0;
   const premium = principal * rate;
   const totalLoanAmount = principal + premium;
 

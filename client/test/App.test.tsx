@@ -17,8 +17,8 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 async function fillRequiredFields(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText(/property price/i), "500000");
-  await user.type(screen.getByLabelText(/down payment/i), "100000");
+  await user.type(screen.getByLabelText("Property price ($)"), "500000");
+  await user.type(screen.getByLabelText("Down payment ($)"), "100000");
   await user.type(screen.getByLabelText(/annual interest rate/i), "5");
 }
 
@@ -84,8 +84,8 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.type(screen.getByLabelText(/property price/i), "500000");
-    await user.type(screen.getByLabelText(/down payment/i), "50000");
+    await user.type(screen.getByLabelText("Property price ($)"), "500000");
+    await user.type(screen.getByLabelText("Down payment ($)"), "50000");
     await user.type(screen.getByLabelText(/annual interest rate/i), "5");
     await user.click(screen.getByRole("button", { name: /calculate payment/i }));
 
@@ -140,6 +140,80 @@ describe("App", () => {
       expect(screen.getByText("Mortgage payment")).toBeInTheDocument();
     });
     expect(screen.queryByRole("status", { name: /calculating payment/i })).not.toBeInTheDocument();
+  });
+
+  it("renders the Buyer Info checkboxes and sends them in the request body when checked", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        payment: 2326.42,
+        mortgagePayment: 2326.42,
+        cmhcPayment: 0,
+        paymentSchedule: "monthly",
+        paymentsPerYear: 12,
+        numberOfPayments: 300,
+        minimumDownPayment: 25000,
+        principal: 400000,
+        isInsured: false,
+        cmhcPremiumRate: 0,
+        cmhcPremium: 0,
+        totalLoanAmount: 400000,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await fillRequiredFields(user);
+    await user.click(
+      screen.getByLabelText(
+        "Down payment includes borrowed funds and gift from non-immediate family members?",
+      ),
+    );
+    await user.click(screen.getByLabelText("Self-Employed without third party verification?"));
+    await user.click(screen.getByRole("button", { name: /calculate payment/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.hasNonTraditionalDownPayment).toBe(true);
+    expect(body.isSelfEmployedNonVerifiedIncome).toBe(true);
+  });
+
+  it("defaults the Buyer Info fields to false when left unchecked", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        payment: 2326.42,
+        mortgagePayment: 2326.42,
+        cmhcPayment: 0,
+        paymentSchedule: "monthly",
+        paymentsPerYear: 12,
+        numberOfPayments: 300,
+        minimumDownPayment: 25000,
+        principal: 400000,
+        isInsured: false,
+        cmhcPremiumRate: 0,
+        cmhcPremium: 0,
+        totalLoanAmount: 400000,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole("button", { name: /calculate payment/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.hasNonTraditionalDownPayment).toBe(false);
+    expect(body.isSelfEmployedNonVerifiedIncome).toBe(false);
   });
 
   it("shows the server's error message on a 400 response", async () => {

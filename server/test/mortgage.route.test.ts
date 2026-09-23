@@ -82,4 +82,29 @@ describe("POST /api/mortgage/payment", () => {
     expect(res.body.isInsured).toBe(true);
     expect(res.body.mortgagePayment + res.body.cmhcPayment).toBeCloseTo(res.body.payment, 10);
   });
+
+  it("returns 200 with the non-traditional down payment rate (4.50% at 7% down)", async () => {
+    const res = await request(app)
+      .post("/api/mortgage/payment")
+      .send({ ...validBody, downPayment: 35_000, hasNonTraditionalDownPayment: true });
+    expect(res.status).toBe(200);
+    expect(res.body.cmhcPremiumRate).toBeCloseTo(0.045, 10);
+  });
+
+  it("returns 200 with the self-employed rate (4.75% at 12% down)", async () => {
+    const res = await request(app)
+      .post("/api/mortgage/payment")
+      .send({ ...validBody, downPayment: 60_000, isSelfEmployedNonVerifiedIncome: true });
+    expect(res.status).toBe(200);
+    expect(res.body.cmhcPremiumRate).toBeCloseTo(0.0475, 10);
+    expect(res.body.minimumDownPayment).toBe(50_000);
+  });
+
+  it("returns 400 DOWN_PAYMENT_TOO_LOW for a self-employed applicant under the 10% floor", async () => {
+    const res = await request(app)
+      .post("/api/mortgage/payment")
+      .send({ ...validBody, downPayment: 40_000, isSelfEmployedNonVerifiedIncome: true }); // 8% down
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("DOWN_PAYMENT_TOO_LOW");
+  });
 });

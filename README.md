@@ -62,7 +62,9 @@ Request body:
   "amortizationYears": 25,
   "paymentSchedule": "monthly",
   "isFirstTimeHomeBuyer": false,
-  "isNewConstruction": false
+  "isNewConstruction": false,
+  "hasNonTraditionalDownPayment": false,
+  "isSelfEmployedNonVerifiedIncome": false
 }
 ```
 
@@ -71,6 +73,9 @@ Request body:
 - `annualInterestRate`: a percentage, e.g. `5` means 5%.
 - `isFirstTimeHomeBuyer` / `isNewConstruction`: optional, default `false`. Only checked when the
   mortgage is insured (down payment under 20%) and `amortizationYears` is 30.
+- `hasNonTraditionalDownPayment` / `isSelfEmployedNonVerifiedIncome`: optional, default `false`.
+  Select an alternate CMHC premium table (and, for the second flag, raise the minimum down
+  payment) — see below.
 
 200 response:
 
@@ -129,8 +134,30 @@ or a 30-year amortization requested on an insured mortgage without an eligible b
   | 15% – 19.99% | 2.80% |
   | 20% or more | 0% (uninsured) |
 
-  This is the standard CMHC schedule for a traditional down payment with verified income; it
-  does not cover non-traditional down payment sources or self-employed/non-verified income.
+  This is the standard CMHC schedule for a traditional down payment with verified income.
+- **Non-traditional down payment** (`hasNonTraditionalDownPayment: true` — down payment includes
+  borrowed funds or a gift from a non-immediate family member) uses a different table; only the
+  5–9.99% bracket differs from standard:
+
+  | Down payment | Premium rate |
+  | --- | --- |
+  | 5% – 9.99% | 4.50% |
+  | 10% – 14.99% | 3.10% |
+  | 15% – 19.99% | 2.80% |
+  | 20% or more | 0% (uninsured) |
+
+- **Self-employed without third-party income verification** (`isSelfEmployedNonVerifiedIncome:
+  true`) raises the minimum down payment to `max(standard tiered minimum, 10% of price)` and uses
+  its own table (no 5–9.99% bracket — unreachable once the 10% floor applies):
+
+  | Down payment | Premium rate |
+  | --- | --- |
+  | 10% – 14.99% | 4.75% |
+  | 15% – 19.99% | 2.90% |
+  | 20% or more | 0% (uninsured) |
+
+  If both flags are set, the self-employed rules (table and minimum down payment) are used —
+  they aren't combined with the non-traditional table.
 - **30-year amortization** on an insured mortgage additionally requires the buyer to be a
   first-time home buyer or to be purchasing a newly constructed home, and adds a 0.20 percentage
-  point surcharge to the premium rate.
+  point surcharge to the premium rate — on top of whichever table above applies.

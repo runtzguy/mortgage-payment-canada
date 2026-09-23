@@ -3,11 +3,18 @@ import {
   amortizedPayment,
   calculateMortgagePayment,
   cmhcPremiumRate,
+  effectiveMinimumDownPayment,
   minimumDownPayment,
   periodicRate,
+  selectCmhcBracketTable,
 } from "../src/services/mortgage.js";
 import { DownPaymentTooLowError, InvalidInputError } from "../src/errors.js";
-import type { MortgageRequest } from "@benjipays/shared";
+import {
+  CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS,
+  CMHC_SELF_EMPLOYED_BRACKETS,
+  CMHC_STANDARD_BRACKETS,
+  type MortgageRequest,
+} from "@benjipays/shared";
 
 function request(overrides: Partial<MortgageRequest> = {}): MortgageRequest {
   return {
@@ -18,6 +25,8 @@ function request(overrides: Partial<MortgageRequest> = {}): MortgageRequest {
     paymentSchedule: "monthly",
     isFirstTimeHomeBuyer: false,
     isNewConstruction: false,
+    hasNonTraditionalDownPayment: false,
+    isSelfEmployedNonVerifiedIncome: false,
     ...overrides,
   };
 }
@@ -63,6 +72,86 @@ describe("cmhcPremiumRate", () => {
   it("adds a 20 bps surcharge for 30-year amortization", () => {
     expect(cmhcPremiumRate(0.1, 30)).toBeCloseTo(0.033, 10);
     expect(cmhcPremiumRate(0.05, 30)).toBeCloseTo(0.042, 10);
+  });
+});
+
+describe("effectiveMinimumDownPayment", () => {
+  it("equals the standard tiered minimum when not self-employed", () => {
+    expect(effectiveMinimumDownPayment(300_000, false)).toBe(minimumDownPayment(300_000));
+    expect(effectiveMinimumDownPayment(2_000_000, false)).toBe(minimumDownPayment(2_000_000));
+  });
+
+  it("raises the minimum to 10% for a self-employed applicant below $1.5M", () => {
+    // Standard minimum for $300k is $15,000 (5%); the self-employed 10% floor is stricter.
+    expect(minimumDownPayment(300_000)).toBe(15_000);
+    expect(effectiveMinimumDownPayment(300_000, true)).toBe(30_000);
+  });
+
+  it("leaves the minimum unchanged at $1.5M+ (standard 20% already exceeds the 10% floor)", () => {
+    expect(effectiveMinimumDownPayment(1_500_000, true)).toBe(300_000);
+    expect(effectiveMinimumDownPayment(2_000_000, true)).toBe(400_000);
+  });
+});
+
+describe("selectCmhcBracketTable", () => {
+  it("uses the standard table when neither flag is set", () => {
+    expect(selectCmhcBracketTable(false, false)).toBe(CMHC_STANDARD_BRACKETS);
+  });
+
+  it("uses the non-traditional table when only that flag is set", () => {
+    expect(selectCmhcBracketTable(true, false)).toBe(CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS);
+  });
+
+  it("uses the self-employed table when only that flag is set", () => {
+    expect(selectCmhcBracketTable(false, true)).toBe(CMHC_SELF_EMPLOYED_BRACKETS);
+  });
+
+  it("uses the self-employed table when both flags are set (self-employed takes priority)", () => {
+    expect(selectCmhcBracketTable(true, true)).toBe(CMHC_SELF_EMPLOYED_BRACKETS);
+  });
+});
+
+describe("cmhcPremiumRate with the non-traditional down payment table", () => {
+  it("is 4.50% for 5% to just under 10% down (vs 4.00% standard)", () => {
+    expect(
+      cmhcPremiumRate(0.05, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS),
+    ).toBeCloseTo(0.045, 10);
+    expect(
+      cmhcPremiumRate(0.0999, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS),
+    ).toBeCloseTo(0.045, 10);
+  });
+
+  it("matches the standard table's rate at 10%+ down", () => {
+    expect(
+      cmhcPremiumRate(0.1, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS),
+    ).toBeCloseTo(0.031, 10);
+    expect(
+      cmhcPremiumRate(0.15, 25, CMHC_NON_TRADITIONAL_DOWN_PAYMENT_BRACKETS),
+    ).toBeCloseTo(0.028, 10);
+  });
+});
+
+describe("cmhcPremiumRate with the self-employed table", () => {
+  it("has no bracket below 10% down (unreachable once the 10% floor applies)", () => {
+    expect(cmhcPremiumRate(0.05, 25, CMHC_SELF_EMPLOYED_BRACKETS)).toBe(0);
+  });
+
+  it("is 4.75% for 10% to just under 15% down", () => {
+    expect(cmhcPremiumRate(0.1, 25, CMHC_SELF_EMPLOYED_BRACKETS)).toBeCloseTo(0.0475, 10);
+    expect(cmhcPremiumRate(0.1499, 25, CMHC_SELF_EMPLOYED_BRACKETS)).toBeCloseTo(0.0475, 10);
+  });
+
+  it("is 2.90% for 15% to just under 20% down", () => {
+    expect(cmhcPremiumRate(0.15, 25, CMHC_SELF_EMPLOYED_BRACKETS)).toBeCloseTo(0.029, 10);
+    expect(cmhcPremiumRate(0.1999, 25, CMHC_SELF_EMPLOYED_BRACKETS)).toBeCloseTo(0.029, 10);
+  });
+
+  it("is 0 at 20%+ down", () => {
+    expect(cmhcPremiumRate(0.2, 25, CMHC_SELF_EMPLOYED_BRACKETS)).toBe(0);
+  });
+
+  it("adds the 20 bps 30-year surcharge on top, same as the standard table", () => {
+    expect(cmhcPremiumRate(0.1, 30, CMHC_SELF_EMPLOYED_BRACKETS)).toBeCloseTo(0.0495, 10);
   });
 });
 
@@ -180,5 +269,56 @@ describe("calculateMortgagePayment", () => {
   it("handles a 0% interest rate", () => {
     const result = calculateMortgagePayment(request({ annualInterestRate: 0 }));
     expect(result.payment).toBe(1333.33);
+  });
+
+  it("prices a non-traditional down payment at 4.50% in the 5-9.99% bracket", () => {
+    // $500k price, 7% down ($35,000) — below the standard table's 5% minimum
+    // rejection point, so this only exercises the rate, not the floor.
+    const result = calculateMortgagePayment(
+      request({ downPayment: 35_000, hasNonTraditionalDownPayment: true }),
+    );
+    expect(result.isInsured).toBe(true);
+    expect(result.cmhcPremiumRate).toBeCloseTo(0.045, 10);
+    expect(result.mortgagePayment).toBe(2704.46);
+    expect(result.cmhcPayment).toBe(121.7);
+    expect(result.payment).toBe(2826.16);
+  });
+
+  it("rejects a self-employed applicant under the 10% minimum, even above the standard 5% minimum", () => {
+    // $500k price, 8% down ($40,000) clears the standard 5% minimum but not
+    // the self-employed 10% floor — and is never priced at 4.00%/4.50%.
+    expect(() =>
+      calculateMortgagePayment(
+        request({ downPayment: 40_000, isSelfEmployedNonVerifiedIncome: true }),
+      ),
+    ).toThrow(DownPaymentTooLowError);
+  });
+
+  it("prices a self-employed applicant at 4.75% in the 10-14.99% bracket", () => {
+    const result = calculateMortgagePayment(
+      request({ downPayment: 60_000, isSelfEmployedNonVerifiedIncome: true }),
+    );
+    expect(result.isInsured).toBe(true);
+    expect(result.minimumDownPayment).toBe(50_000); // self-employed 10% floor, not the 5% standard
+    expect(result.cmhcPremiumRate).toBeCloseTo(0.0475, 10);
+    expect(result.mortgagePayment).toBe(2559.06);
+    expect(result.cmhcPayment).toBe(121.56);
+    expect(result.payment).toBe(2680.62);
+  });
+
+  it("uses the self-employed rules, not the non-traditional rules, when both flags are set", () => {
+    const bothFlags = calculateMortgagePayment(
+      request({
+        downPayment: 60_000,
+        hasNonTraditionalDownPayment: true,
+        isSelfEmployedNonVerifiedIncome: true,
+      }),
+    );
+    const selfEmployedOnly = calculateMortgagePayment(
+      request({ downPayment: 60_000, isSelfEmployedNonVerifiedIncome: true }),
+    );
+    expect(bothFlags.cmhcPremiumRate).toBeCloseTo(0.0475, 10); // self-employed's rate
+    expect(bothFlags.cmhcPremiumRate).not.toBeCloseTo(0.031, 5); // not non-traditional's rate at 12% down
+    expect(bothFlags).toEqual(selfEmployedOnly);
   });
 });
